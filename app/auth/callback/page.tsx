@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
-export const runtime = "nodejs"; // Prevents Edge runtime warnings
+export const runtime = "nodejs"; // run in node runtime
 
 export default function AuthCallbackPage() {
   const router = useRouter();
@@ -19,40 +19,30 @@ export default function AuthCallbackPage() {
         let params: Record<string, string> = {};
 
         if (hash) {
-          // Handle #access_token=...&refresh_token=...
           const cleanHash = hash.substring(1);
           const searchParams = new URLSearchParams(cleanHash);
-          searchParams.forEach((value, key) => {
-            params[key] = value;
-          });
+          searchParams.forEach((v, k) => (params[k] = v));
         } else if (query) {
-          // Handle ?code=...
           const searchParams = new URLSearchParams(query);
-          searchParams.forEach((value, key) => {
-            params[key] = value;
-          });
+          searchParams.forEach((v, k) => (params[k] = v));
         }
 
-        // Exchange code or set session depending on format
         if (params["code"]) {
           const { error } = await supabase.auth.exchangeCodeForSession(params["code"]);
           if (error) throw error;
-          console.log("✅ Logged in using code exchange");
         } else if (params["access_token"]) {
           const { error } = await supabase.auth.setSession({
             access_token: params["access_token"],
             refresh_token: params["refresh_token"],
           });
           if (error) throw error;
-          console.log("✅ Logged in using token hash");
         } else {
-          throw new Error("No authentication parameters found.");
+          throw new Error("No authentication parameters found");
         }
 
-        // Fetch the current user info
         const { data: userData } = await supabase.auth.getUser();
-        const userEmail = userData?.user?.email || null;
-        const displayName = userEmail ? userEmail.split("@")[0] : null;
+        const email = userData?.user?.email;
+        const displayName = email ? email.split("@")[0] : null;
 
         if (displayName) {
           setUserName(displayName);
@@ -61,12 +51,9 @@ export default function AuthCallbackPage() {
           setStatusMessage("Welcome back!");
         }
 
-        // Small delay so the user sees the greeting
-        setTimeout(() => {
-          router.push("/items");
-        }, 2000);
+        setTimeout(() => router.push("/items"), 2000);
       } catch (err) {
-        console.error("❌ Auth callback error:", err);
+        console.error("Auth error:", err);
         setStatusMessage("Login failed. Redirecting...");
         setTimeout(() => router.push("/login"), 2000);
       }
@@ -76,7 +63,7 @@ export default function AuthCallbackPage() {
   }, [router]);
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen text-gray-700 dark:text-gray-300 transition-all">
+    <div className="flex flex-col items-center justify-center min-h-screen text-gray-700 dark:text-gray-300">
       <div className="text-center">
         <h1 className="text-2xl font-semibold mb-3">{statusMessage}</h1>
         {!userName && (
