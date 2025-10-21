@@ -1,0 +1,40 @@
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --radius: 1rem;
+}
+
+html, body {
+  height: 100%;
+}
+
+body {
+  @apply bg-gray-50 text-gray-900;
+}
+.container {
+  @apply max-w-6xl mx-auto px-4;
+}
+.card {
+  @apply rounded-2xl shadow-sm border bg-white;
+}
+.btn {
+  @apply inline-flex items-center justify-center rounded-2xl border px-4 py-2 text-sm font-medium transition;
+}
+.btn-primary {
+  @apply bg-ubBlue text-white border-ubBlue hover:opacity-90;
+}
+.btn-secondary {
+  @apply bg-white text-ubBlue border-ubBlue hover:bg-gray-50;
+}
+.input, .select, .textarea {
+  @apply w-full rounded-2xl border px-3 py-2 outline-none focus:ring-2 focus:ring-ubGold;
+}
+.badge {
+  @apply inline-block rounded-full bg-gray-100 px-3 py-1 text-xs font-medium;
+}
+.kpi {
+  @apply card p-4 flex flex-col gap-1;
+}
