@@ -4,34 +4,60 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
-export const runtime = "nodejs"; // ✅ prevents Edge runtime issues
+export const runtime = "nodejs";
 
 export default function AuthCallbackPage() {
   const router = useRouter();
 
   useEffect(() => {
-    async function handleAuthCallback() {
-      const params = new URLSearchParams(window.location.search);
-      const code = params.get("code");
+    async function handleAuth() {
+      try {
+        const hash = window.location.hash;
+        const query = window.location.search;
+        let params: Record<string, string> = {};
 
-      if (!code) {
-        console.warn("⚠️ No auth code found in URL.");
+        if (hash) {
+          // Convert #access_token=...&refresh_token=... into query-like params
+          const cleanHash = hash.substring(1);
+          const searchParams = new URLSearchParams(cleanHash);
+          searchParams.forEach((value, key) => {
+            params[key] = value;
+          });
+        } else if (query) {
+          // Regular ?code=... style params
+          const searchParams = new URLSearchParams(query);
+          searchParams.forEach((value, key) => {
+            params[key] = value;
+          });
+        }
+
+        // Handle both cases
+        if (params["code"]) {
+          // Case 1: ?code=...
+          const { error } = await supabase.auth.exchangeCodeForSession(params["code"]);
+          if (error) throw error;
+          console.log("✅ Logged in using code exchange");
+        } else if (params["access_token"]) {
+          // Case 2: #access_token=...
+          const { data, error } = await supabase.auth.setSession({
+            access_token: params["access_token"],
+            refresh_token: params["refresh_token"],
+          });
+          if (error) throw error;
+          console.log("✅ Logged in using token hash");
+        } else {
+          throw new Error("No authentication params found");
+        }
+
+        // Redirect to home or items page
+        router.push("/items");
+      } catch (err) {
+        console.error("❌ Auth callback error:", err);
         router.push("/login");
-        return;
-      }
-
-      const { error } = await supabase.auth.exchangeCodeForSession(code);
-
-      if (error) {
-        console.error("❌ Error exchanging code:", error.message);
-        router.push("/login");
-      } else {
-        console.log("✅ Login successful!");
-        router.push("/"); // redirect to homepage or /items
       }
     }
 
-    handleAuthCallback();
+    handleAuth();
   }, [router]);
 
   return (
