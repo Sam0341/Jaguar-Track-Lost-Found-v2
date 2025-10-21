@@ -14,13 +14,14 @@ export default function LoginPage() {
   const [message, setMessage] = useState("");
   const router = useRouter();
 
-  // ✅ Redirect logged-in users
+  // ✅ Redirect logged-in users (normal users)
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) router.replace("/items");
     });
   }, [router]);
 
+  // ✅ Handle normal user login
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -33,14 +34,14 @@ export default function LoginPage() {
       return;
     }
 
-    // UB email check for normal users
+    // ✅ Check UB email
     if (!email.endsWith("@ub.edu.bz")) {
       setMessage("❌ Please use your UB email address");
       setLoading(false);
       return;
     }
 
-    // Regular user Supabase magic link
+    // ✅ Regular user magic link login
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: {
@@ -57,19 +58,24 @@ export default function LoginPage() {
     setLoading(false);
   };
 
-  // 🧩 Handle admin login
+  // ✅ Handle Admin Login (manual)
   const handleAdminLogin = (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setMessage("");
 
-    // Set your admin password in .env.local for safety
+    // ⚙️ Password stored in .env.local as NEXT_PUBLIC_ADMIN_PASSWORD
     const ADMIN_PASSWORD =
-      process.env.NEXT_PUBLIC_ADMIN_PASSWORD || "JaguarAdmin@2025";
+      process.env.NEXT_PUBLIC_ADMIN_PASSWORD || "Admin@1234";
 
     if (adminPassword === ADMIN_PASSWORD) {
+      // ✅ Store admin flag in localStorage
+      localStorage.setItem("isManualAdmin", "true");
+
       setMessage("✅ Welcome, Admin!");
-      setTimeout(() => router.push("/admin"), 1000);
+      setTimeout(() => {
+        router.push("/admin");
+      }, 1000);
     } else {
       setMessage("❌ Incorrect admin password");
     }
@@ -84,15 +90,16 @@ export default function LoginPage() {
           Jaguar Track Login
         </h1>
         <p className="text-sm text-gray-600 dark:text-gray-400 text-center mb-6">
-          Sign in using your <strong>@ub.edu.bz</strong> email or use the{" "}
-          <strong>admin login</strong>.
+          Sign in using your <strong>@ub.edu.bz</strong> email, or log in as{" "}
+          <strong>admin</strong>.
         </p>
 
+        {/* 🧩 USER LOGIN */}
         {!adminMode ? (
           <form onSubmit={handleLogin} className="space-y-4">
             <input
               type="text"
-              placeholder="you@ub.edu.bz or 'admin'"
+              placeholder="you@ub.edu.bz or type 'admin'"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="w-full p-3 rounded-lg border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:ring-2 focus:ring-ubGold focus:outline-none"
@@ -112,6 +119,7 @@ export default function LoginPage() {
             </button>
           </form>
         ) : (
+          /* 🧩 ADMIN LOGIN */
           <form onSubmit={handleAdminLogin} className="space-y-4">
             <input
               type="password"
@@ -148,6 +156,7 @@ export default function LoginPage() {
           </form>
         )}
 
+        {/* ✅ Message display */}
         {message && (
           <p
             className={`mt-4 text-center text-sm font-medium ${
