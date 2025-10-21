@@ -15,7 +15,7 @@ export type Item = {
   profiles?: {
     full_name?: string;
     email?: string;
-  };
+  }[]; // ✅ fixed: now an array to match Supabase response
 };
 
 // 🧩 Fetch all items
@@ -24,8 +24,7 @@ export async function getAllItems() {
 
   const { data, error } = await supabase
     .from("items")
-    .select(
-      `
+    .select(`
       id,
       name,
       description,
@@ -36,8 +35,7 @@ export async function getAllItems() {
       reporter_name,
       reporter_email,
       reported_at
-    `
-    )
+    `)
     .order("reported_at", { ascending: false });
 
   if (error) {
@@ -68,8 +66,7 @@ export async function getItemById(id: string) {
 
   const { data, error } = await supabase
     .from("items")
-    .select(
-      `
+    .select(`
       id,
       name,
       description,
@@ -84,8 +81,7 @@ export async function getItemById(id: string) {
         full_name,
         email
       )
-    `
-    )
+    `)
     .eq("id", id)
     .single();
 
@@ -97,6 +93,9 @@ export async function getItemById(id: string) {
   const SUPABASE_URL =
     "https://npudlbublntelxzmzlmu.supabase.co/storage/v1/object/public/item-photos";
 
+  // ✅ Safely grab the first profile if it exists
+  const profile = data.profiles?.[0];
+
   const finalData = {
     ...data,
     image_url: data.image
@@ -104,8 +103,8 @@ export async function getItemById(id: string) {
         ? data.image
         : `${SUPABASE_URL}/${data.image}`
       : "https://placehold.co/600x400?text=No+Image+Available",
-    reporter_name: data.profiles?.full_name || data.reporter_name,
-    reporter_email: data.profiles?.email || data.reporter_email,
+    reporter_name: profile?.full_name || data.reporter_name,
+    reporter_email: profile?.email || data.reporter_email,
   };
 
   console.log("🧩 getItemById() result:", finalData);
