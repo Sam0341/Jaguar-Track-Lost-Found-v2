@@ -20,7 +20,7 @@ export default function AdminDashboard() {
           return;
         }
 
-        // 📦 Fetch all items with details
+        // 📦 Fetch all items (use reported_at instead of created_at)
         const { data: itemsData, error: itemsError } = await supabase
           .from("items")
           .select(
@@ -35,16 +35,16 @@ export default function AdminDashboard() {
             status,
             reporter_name,
             reporter_email,
-            created_at,
+            reported_at,
             claimed_by,
             claimed_at
           `
           )
-          .order("created_at", { ascending: false });
+          .order("reported_at", { ascending: false });
 
         if (itemsError) throw itemsError;
 
-        // 👤 Fetch all users (optional)
+        // 👤 Fetch users (profiles)
         const { data: usersData, error: usersError } = await supabase
           .from("profiles")
           .select("id, full_name, email, role, created_at")
@@ -129,7 +129,9 @@ export default function AdminDashboard() {
                     </span>
                   </td>
                   <td className="p-3 text-sm text-gray-500 dark:text-gray-400">
-                    {new Date(item.created_at).toLocaleDateString()}
+                    {item.reported_at
+                      ? new Date(item.reported_at).toLocaleDateString()
+                      : "—"}
                   </td>
                 </tr>
               ))}
@@ -176,7 +178,9 @@ export default function AdminDashboard() {
                       {user.role || "user"}
                     </td>
                     <td className="p-3 text-sm text-gray-500 dark:text-gray-400">
-                      {new Date(user.created_at).toLocaleDateString()}
+                      {user.created_at
+                        ? new Date(user.created_at).toLocaleDateString()
+                        : "—"}
                     </td>
                   </tr>
                 ))}
