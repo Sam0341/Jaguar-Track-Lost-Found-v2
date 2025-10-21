@@ -11,44 +11,52 @@ export default function AdminPage() {
   const router = useRouter();
 
   useEffect(() => {
-    async function checkAdmin() {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+    async function checkAccess() {
+      try {
+        // 1️⃣ First, check if a Supabase user is logged in
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
 
-      if (!user) {
-        // 🚫 Not logged in
-        alert("You must log in to access this page.");
+        // 2️⃣ Check for Supabase admin
+        if (user?.user_metadata?.role === "admin") {
+          setIsAdmin(true);
+          setLoading(false);
+          return;
+        }
+
+        // 3️⃣ Otherwise, check for manual admin login stored in localStorage
+        const localAdmin = localStorage.getItem("isManualAdmin");
+        if (localAdmin === "true") {
+          setIsAdmin(true);
+          setLoading(false);
+          return;
+        }
+
+        // 🚫 No valid access
+        alert("Access denied. Admins only.");
         router.push("/login");
-        return;
+      } catch (err) {
+        console.error("Error checking admin access:", err);
+        alert("Something went wrong while verifying access.");
+        router.push("/login");
+      } finally {
+        setLoading(false);
       }
-
-      // ✅ Check if the user is admin
-      const role = user.user_metadata?.role;
-      if (role === "admin") {
-        setIsAdmin(true);
-      } else {
-        alert("Access Denied: Admins only.");
-        router.push("/");
-      }
-
-      setLoading(false);
     }
 
-    checkAdmin();
+    checkAccess();
   }, [router]);
 
   if (loading) {
     return (
-      <div className="flex justify-center items-center h-64 text-lg text-gray-600">
-        Checking access...
+      <div className="flex justify-center items-center h-64 text-lg text-gray-600 dark:text-gray-300">
+        Checking admin access...
       </div>
     );
   }
 
-  if (!isAdmin) {
-    return null; // Prevents flashing content for non-admins
-  }
+  if (!isAdmin) return null;
 
   return <AdminDashboard />;
 }
