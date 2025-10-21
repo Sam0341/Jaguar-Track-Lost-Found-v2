@@ -8,6 +8,7 @@ export type Item = {
   campus: string;
   status: string;
   image?: string;
+  image_url?: string; // ✅ added for Vercel build
   reported_by?: string;
   reporter_name?: string;
   reporter_email?: string;
@@ -15,7 +16,7 @@ export type Item = {
   profiles?: {
     full_name?: string;
     email?: string;
-  }[]; // ✅ fixed: now an array to match Supabase response
+  }[]; // ✅ array fixed
 };
 
 // 🧩 Fetch all items
@@ -43,7 +44,6 @@ export async function getAllItems() {
     return [];
   }
 
-  // 🖼️ Build public image URLs
   const SUPABASE_URL =
     "https://npudlbublntelxzmzlmu.supabase.co/storage/v1/object/public/item-photos";
 
@@ -93,7 +93,6 @@ export async function getItemById(id: string) {
   const SUPABASE_URL =
     "https://npudlbublntelxzmzlmu.supabase.co/storage/v1/object/public/item-photos";
 
-  // ✅ Safely grab the first profile if it exists
   const profile = data.profiles?.[0];
 
   const finalData = {
@@ -138,7 +137,6 @@ export async function addItem({
   try {
     let imagePath: string | null = null;
 
-    // ✅ Upload image to Supabase storage
     if (imageFile) {
       const fileName = `${Date.now()}-${imageFile.name}`;
       const { error: uploadError } = await supabase.storage
@@ -149,7 +147,6 @@ export async function addItem({
       imagePath = fileName;
     }
 
-    // ✅ Insert record into the database
     const { data, error } = await supabase.from("items").insert([
       {
         name,

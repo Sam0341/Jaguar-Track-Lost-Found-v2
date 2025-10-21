@@ -1,5 +1,7 @@
 "use client";
 
+export const runtime = "nodejs"; // ✅ prevents Edge runtime warnings
+
 import { useEffect, useState } from "react";
 import { getAllItems, type Item } from "@/lib/items";
 import Link from "next/link";
@@ -62,7 +64,6 @@ export default function ItemsPage() {
 
       {/* 🔍 Filters */}
       <div className="flex flex-col md:flex-row justify-center gap-4 mb-8">
-        {/* Search Bar */}
         <input
           type="text"
           placeholder="Search by name or description..."
@@ -71,7 +72,6 @@ export default function ItemsPage() {
           className="border border-ubBlue dark:border-ubGold bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 p-2 rounded-lg w-full md:w-1/3 focus:ring-2 focus:ring-ubGold transition"
         />
 
-        {/* Category Filter */}
         <select
           value={categoryFilter}
           onChange={(e) => setCategoryFilter(e.target.value)}
@@ -88,7 +88,6 @@ export default function ItemsPage() {
           <option>Other</option>
         </select>
 
-        {/* Campus Filter */}
         <select
           value={campusFilter}
           onChange={(e) => setCampusFilter(e.target.value)}
@@ -111,7 +110,6 @@ export default function ItemsPage() {
             key={item.id}
             className="bg-white dark:bg-gray-900 shadow-sm rounded-2xl border border-gray-200 dark:border-gray-700 hover:shadow-lg hover:border-ubGold transition overflow-hidden group"
           >
-            {/* 🖼️ UB Blue/Gold Shimmer */}
             <div className="h-48 bg-gray-100 dark:bg-gray-800 flex items-center justify-center relative overflow-hidden">
               <div className="absolute inset-0 bg-gradient-to-r from-ubBlue/20 via-ubGold/40 to-ubBlue/20 animate-[shimmer_1.5s_infinite]" />
               <img
@@ -133,7 +131,6 @@ export default function ItemsPage() {
               />
             </div>
 
-            {/* Info Section */}
             <div className="p-4">
               <h2 className="font-bold text-lg text-gray-900 dark:text-gray-100">
                 {item.name}
@@ -170,7 +167,6 @@ export default function ItemsPage() {
         ))}
       </div>
 
-      {/* 🌀 Custom shimmer keyframes */}
       <style jsx>{`
         @keyframes shimmer {
           0% {
