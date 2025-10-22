@@ -21,29 +21,31 @@ export default function LoginPage() {
     });
   }, [router]);
 
-  // ✅ Regular UB email login
+  // ✅ Regular UB email or admin login
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setMessage("");
 
-    // 🧩 If typed "admin", go to admin mode
-    if (email.trim().toLowerCase() === "admin") {
+    const trimmedEmail = email.trim().toLowerCase();
+
+    // 🧩 If typed "admin" or "admin@system.local", go to admin mode
+    if (trimmedEmail === "admin" || trimmedEmail === "admin@system.local") {
       setAdminMode(true);
       setLoading(false);
       return;
     }
 
     // ✅ Validate UB email
-    if (!email.endsWith("@ub.edu.bz")) {
-      setMessage("❌ Please use your UB email address");
+    if (!trimmedEmail.endsWith("@ub.edu.bz")) {
+      setMessage("❌ Please use your UB email address or admin@system.local");
       setLoading(false);
       return;
     }
 
     // ✅ Send Supabase magic link
     const { error } = await supabase.auth.signInWithOtp({
-      email,
+      email: trimmedEmail,
       options: { emailRedirectTo: `${location.origin}/auth/callback` },
     });
 
@@ -56,19 +58,18 @@ export default function LoginPage() {
     setLoading(false);
   };
 
-  // ✅ Manual Admin Login
+  // ✅ Manual Admin Login (Password Protected)
   const handleAdminLogin = (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setMessage("");
 
-    // Get password from .env.local (fallback if missing)
     const ADMIN_PASSWORD =
       process.env.NEXT_PUBLIC_ADMIN_PASSWORD || "Admin@1234";
 
     if (adminPassword === ADMIN_PASSWORD) {
-      // ✅ Store admin flag so Navbar knows you're logged in
-      localStorage.setItem("isAdmin", "true");
+      // ✅ Save admin flag in localStorage for session persistence
+      localStorage.setItem("isManualAdmin", "true");
 
       setMessage("✅ Welcome, Admin! Redirecting...");
       setTimeout(() => {

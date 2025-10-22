@@ -13,18 +13,28 @@ export default function AdminPage() {
   useEffect(() => {
     async function checkAccess() {
       try {
+        // ✅ Step 1: Try to get Supabase user
         const {
           data: { user },
           error,
         } = await supabase.auth.getUser();
 
+        // ✅ Step 2: If manual admin (local flag), allow access right away
+        const manualAdmin = localStorage.getItem("isManualAdmin");
+        if (manualAdmin === "true") {
+          setIsAdmin(true);
+          setLoading(false);
+          return;
+        }
+
+        // 🚫 No user, no manual admin → redirect
         if (error || !user) {
-          alert("You must be logged in.");
+          console.warn("No Supabase user found");
           router.push("/login");
           return;
         }
 
-        // ✅ Fetch the role from your `profiles` table
+        // ✅ Step 3: Fetch user profile from DB
         const { data: profile, error: profileError } = await supabase
           .from("profiles")
           .select("role")
@@ -33,26 +43,17 @@ export default function AdminPage() {
 
         if (profileError) {
           console.error("Profile fetch error:", profileError);
-          alert("Unable to verify your account role.");
           router.push("/login");
           return;
         }
 
-        // ✅ Check if user is admin
+        // ✅ Step 4: If role is admin, grant access
         if (profile?.role === "admin") {
           setIsAdmin(true);
-          return;
+        } else {
+          console.warn("Access denied: not admin");
+          router.push("/login");
         }
-
-        // ✅ Local override (manual admin)
-        if (localStorage.getItem("isManualAdmin") === "true") {
-          setIsAdmin(true);
-          return;
-        }
-
-        // 🚫 Not admin
-        alert("Access denied. Admins only.");
-        router.push("/login");
       } catch (err) {
         console.error("Admin access error:", err);
         router.push("/login");
@@ -64,6 +65,7 @@ export default function AdminPage() {
     checkAccess();
   }, [router]);
 
+  // 🌀 Loading State
   if (loading) {
     return (
       <div className="flex justify-center items-center h-[70vh] text-lg text-gray-600 dark:text-gray-300">
@@ -72,8 +74,10 @@ export default function AdminPage() {
     );
   }
 
+  // 🚫 Not admin (hidden for security)
   if (!isAdmin) return null;
 
+  // ✅ Admin Access Granted
   return (
     <section className="animate-fade-in">
       <AdminDashboard />
