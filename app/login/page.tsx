@@ -14,39 +14,37 @@ export default function LoginPage() {
   const [message, setMessage] = useState("");
   const router = useRouter();
 
-  // ✅ Redirect logged-in users (normal users)
+  // ✅ Redirect if already logged in (regular user)
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) router.replace("/items");
     });
   }, [router]);
 
-  // ✅ Handle normal user login
+  // ✅ Regular UB email login
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setMessage("");
 
-    // 🧩 If "admin" typed, switch to admin mode
+    // 🧩 If typed "admin", go to admin mode
     if (email.trim().toLowerCase() === "admin") {
       setAdminMode(true);
       setLoading(false);
       return;
     }
 
-    // ✅ Check UB email
+    // ✅ Validate UB email
     if (!email.endsWith("@ub.edu.bz")) {
       setMessage("❌ Please use your UB email address");
       setLoading(false);
       return;
     }
 
-    // ✅ Regular user magic link login
+    // ✅ Send Supabase magic link
     const { error } = await supabase.auth.signInWithOtp({
       email,
-      options: {
-        emailRedirectTo: `${location.origin}/auth/callback`,
-      },
+      options: { emailRedirectTo: `${location.origin}/auth/callback` },
     });
 
     if (error) {
@@ -58,24 +56,24 @@ export default function LoginPage() {
     setLoading(false);
   };
 
-  // ✅ Handle Admin Login (manual)
+  // ✅ Manual Admin Login
   const handleAdminLogin = (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setMessage("");
 
-    // ⚙️ Password stored in .env.local as NEXT_PUBLIC_ADMIN_PASSWORD
+    // Get password from .env.local (fallback if missing)
     const ADMIN_PASSWORD =
       process.env.NEXT_PUBLIC_ADMIN_PASSWORD || "Admin@1234";
 
     if (adminPassword === ADMIN_PASSWORD) {
-      // ✅ Store admin flag in localStorage
-      localStorage.setItem("isManualAdmin", "true");
+      // ✅ Store admin flag so Navbar knows you're logged in
+      localStorage.setItem("isAdmin", "true");
 
-      setMessage("✅ Welcome, Admin!");
+      setMessage("✅ Welcome, Admin! Redirecting...");
       setTimeout(() => {
         router.push("/admin");
-      }, 1000);
+      }, 1200);
     } else {
       setMessage("❌ Incorrect admin password");
     }
@@ -94,7 +92,7 @@ export default function LoginPage() {
           <strong>admin</strong>.
         </p>
 
-        {/* 🧩 USER LOGIN */}
+        {/* 🧩 Regular UB Email Login */}
         {!adminMode ? (
           <form onSubmit={handleLogin} className="space-y-4">
             <input
@@ -119,7 +117,7 @@ export default function LoginPage() {
             </button>
           </form>
         ) : (
-          /* 🧩 ADMIN LOGIN */
+          // 🧩 Admin Login Mode
           <form onSubmit={handleAdminLogin} className="space-y-4">
             <input
               type="password"
@@ -156,7 +154,7 @@ export default function LoginPage() {
           </form>
         )}
 
-        {/* ✅ Message display */}
+        {/* 🧾 Feedback Message */}
         {message && (
           <p
             className={`mt-4 text-center text-sm font-medium ${

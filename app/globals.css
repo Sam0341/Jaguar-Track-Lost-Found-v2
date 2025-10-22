@@ -1,40 +1,75 @@
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* ----------------------------------------- */
+/* 🔹 Modal animation for Admin Dashboard */
+/* ----------------------------------------- */
+@keyframes slideUp {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-up {
+  animation: slideUp 0.3s ease-out forwards;
+}
+
+/* ----------------------------------------- */
+/* 🔹 Global Theme and Layout Styles */
+/* ----------------------------------------- */
 :root {
   --radius: 1rem;
 }
 
-html, body {
+html,
+body {
   height: 100%;
 }
 
+/* ✅ Tailwind apply comes after custom keyframes */
 body {
-  @apply bg-gray-50 text-gray-900;
+  @apply bg-gray-50 text-gray-900 dark:bg-gray-950 dark:text-gray-100 transition-colors duration-500;
 }
+
+/* ----------------------------------------- */
+/* 🔹 Reusable Utility Classes */
+/* ----------------------------------------- */
 .container {
   @apply max-w-6xl mx-auto px-4;
 }
+
 .card {
-  @apply rounded-2xl shadow-sm border bg-white;
+  @apply rounded-2xl shadow-sm border bg-white dark:bg-gray-800 dark:border-gray-700;
 }
+
 .btn {
   @apply inline-flex items-center justify-center rounded-2xl border px-4 py-2 text-sm font-medium transition;
 }
+
 .btn-primary {
   @apply bg-ubBlue text-white border-ubBlue hover:opacity-90;
 }
+
 .btn-secondary {
-  @apply bg-white text-ubBlue border-ubBlue hover:bg-gray-50;
+  @apply bg-white text-ubBlue border-ubBlue hover:bg-gray-50 dark:bg-gray-900 dark:text-ubGold;
 }
-.input, .select, .textarea {
-  @apply w-full rounded-2xl border px-3 py-2 outline-none focus:ring-2 focus:ring-ubGold;
+
+.input,
+.select,
+.textarea {
+  @apply w-full rounded-2xl border px-3 py-2 outline-none focus:ring-2 focus:ring-ubGold dark:bg-gray-900 dark:border-gray-700;
 }
+
 .badge {
-  @apply inline-block rounded-full bg-gray-100 px-3 py-1 text-xs font-medium;
+  @apply inline-block rounded-full bg-gray-100 dark:bg-gray-700 px-3 py-1 text-xs font-medium;
 }
+
 .kpi {
   @apply card p-4 flex flex-col gap-1;
 }

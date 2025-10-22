@@ -3,12 +3,12 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Menu, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "@/lib/supabaseClient";
 import ThemeToggle from "./ThemeToggle";
-import { useSupabaseAuth } from "@/components/SupabaseProvider"; // ✅ use context instead of fetching manually
+import { useSupabaseAuth } from "@/components/SupabaseProvider";
 
 function NavLink({
   href,
@@ -26,7 +26,7 @@ function NavLink({
     <Link
       href={href}
       onClick={onClick}
-      className={`block px-3 py-2 text-lg transition ${
+      className={`block px-3 py-2 text-base md:text-lg transition ${
         isActive
           ? "text-blue-600 dark:text-ubGold font-semibold"
           : "text-gray-700 dark:text-gray-200 hover:text-blue-500 dark:hover:text-ubGold"
@@ -39,30 +39,51 @@ function NavLink({
 
 export default function Navbar() {
   const router = useRouter();
-  const { user, loading } = useSupabaseAuth(); // ✅ use global session
+  const { user, loading } = useSupabaseAuth();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [isManualAdmin, setIsManualAdmin] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const adminFlag = localStorage.getItem("isManualAdmin");
+      setIsManualAdmin(!!adminFlag);
+
+      const handleScroll = () => setScrolled(window.scrollY > 10);
+      window.addEventListener("scroll", handleScroll);
+      return () => window.removeEventListener("scroll", handleScroll);
+    }
+  }, []);
 
   const handleLogout = async () => {
+    localStorage.removeItem("isManualAdmin");
     await supabase.auth.signOut();
     router.push("/login");
   };
 
   const userRole = user?.user_metadata?.role;
+  const isAdmin = userRole === "admin" || isManualAdmin;
   const userName = user?.email?.split("@")[0] || "User";
 
   return (
-    <header className="bg-white dark:bg-gray-900 dark:text-gray-100 shadow sticky top-0 z-50 transition-colors duration-300">
-      <div className="max-w-7xl mx-auto flex items-center justify-between p-4">
+    <header
+      className={`sticky top-0 z-[1000] w-full transition-all duration-300 ${
+        scrolled
+          ? "bg-white/90 dark:bg-gray-900/90 backdrop-blur-md shadow-md py-2"
+          : "bg-white dark:bg-gray-900 py-3"
+      }`}
+    >
+      <div className="max-w-7xl mx-auto flex items-center justify-between px-4 sm:px-6 lg:px-8">
         {/* 🐾 Logo */}
         <Link href="/" className="flex items-center gap-2">
           <Image
             src="/logo.png"
             alt="Jaguar Track Logo"
-            width={40}
-            height={40}
+            width={38}
+            height={38}
             className="rounded-full"
           />
-          <span className="text-lg md:text-xl font-bold text-gray-800 dark:text-gray-100">
+          <span className="text-base md:text-lg font-bold text-gray-800 dark:text-gray-100 whitespace-nowrap">
             Jaguar Track Lost & Found
           </span>
         </Link>
@@ -73,28 +94,31 @@ export default function Navbar() {
           <NavLink href="/items">Items</NavLink>
 
           {/* 👤 Regular Users */}
-          {user && userRole !== "admin" && <NavLink href="/report">Report</NavLink>}
+          {user && !isAdmin && <NavLink href="/report">Report</NavLink>}
 
           {/* 🧑‍💼 Admin Users */}
-          {userRole === "admin" && (
+          {isAdmin && (
             <>
               <NavLink href="/reports">Reports</NavLink>
               <NavLink href="/admin">Admin</NavLink>
             </>
           )}
 
-          {/* 🌙 Dark Mode Toggle */}
+          {/* 🌙 Dark Mode */}
           <ThemeToggle />
 
           {/* 👋 User Display + Logout */}
-          {!loading && user ? (
+          {!loading && (user || isAdmin) ? (
             <div className="flex items-center gap-3">
               <span className="text-sm text-gray-700 dark:text-gray-300">
-                Hi, <span className="font-semibold">{userName}</span>
+                Hi,{" "}
+                <span className="font-semibold">
+                  {isAdmin ? "Admin" : userName}
+                </span>
               </span>
               <button
                 onClick={handleLogout}
-                className="bg-gray-800 dark:bg-gray-700 text-white px-3 py-1 rounded hover:bg-gray-700 dark:hover:bg-gray-600 transition"
+                className="bg-red-600 dark:bg-red-700 text-white px-3 py-1 rounded-md hover:bg-red-700 dark:hover:bg-red-600 transition"
               >
                 Logout
               </button>
@@ -102,7 +126,7 @@ export default function Navbar() {
           ) : (
             <Link
               href="/login"
-              className="bg-blue-600 dark:bg-ubGold text-white dark:text-gray-900 px-3 py-1 rounded hover:bg-blue-500 dark:hover:bg-yellow-400 transition"
+              className="bg-blue-600 dark:bg-ubGold text-white dark:text-gray-900 px-3 py-1 rounded-md hover:bg-blue-500 dark:hover:bg-yellow-400 transition"
             >
               Login
             </Link>
@@ -115,7 +139,7 @@ export default function Navbar() {
           className="md:hidden p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
           onClick={() => setMenuOpen(true)}
         >
-          <Menu size={28} />
+          <Menu size={26} />
         </button>
       </div>
 
@@ -140,7 +164,7 @@ export default function Navbar() {
               <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
                 <span className="font-bold text-lg">Menu</span>
                 <button onClick={() => setMenuOpen(false)}>
-                  <X size={28} />
+                  <X size={26} />
                 </button>
               </div>
 
@@ -152,13 +176,13 @@ export default function Navbar() {
                   Items
                 </NavLink>
 
-                {user && userRole !== "admin" && (
+                {!isAdmin && user && (
                   <NavLink href="/report" onClick={() => setMenuOpen(false)}>
                     Report
                   </NavLink>
                 )}
 
-                {userRole === "admin" && (
+                {isAdmin && (
                   <>
                     <NavLink href="/reports" onClick={() => setMenuOpen(false)}>
                       Reports
@@ -171,13 +195,13 @@ export default function Navbar() {
 
                 <div className="pt-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
                   <ThemeToggle />
-                  {!loading && user ? (
+                  {!loading && (user || isAdmin) ? (
                     <button
                       onClick={() => {
                         handleLogout();
                         setMenuOpen(false);
                       }}
-                      className="bg-gray-800 dark:bg-gray-700 text-white px-3 py-1 rounded hover:bg-gray-700 dark:hover:bg-gray-600 transition"
+                      className="bg-red-600 dark:bg-red-700 text-white px-3 py-1 rounded hover:bg-red-700 dark:hover:bg-red-600 transition"
                     >
                       Logout
                     </button>

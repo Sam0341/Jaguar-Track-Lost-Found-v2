@@ -1,250 +1,180 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabaseClient";
-
-type Item = {
-  id: string;
-  name: string;
-  description: string;
-  category: string;
-  campus: string;
-  location: string;
-  image?: string;
-  status: string;
-  reporter_name?: string;
-  reporter_email?: string;
-  reported_at?: string;
-};
 
 export default function AdminDashboard() {
-  const [items, setItems] = useState<Item[]>([]);
-  const [selectedItem, setSelectedItem] = useState<Item | null>(null);
+  const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState("");
-  const [editing, setEditing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedItem, setSelectedItem] = useState<any>(null);
 
-  // ✅ Fetch all items
   useEffect(() => {
-    async function fetchItems() {
-      const { data, error } = await supabase
-        .from("items")
-        .select("*")
-        .order("reported_at", { ascending: false });
-
-      if (error) {
-        console.error("Error loading items:", error.message);
-      } else {
-        setItems(data || []);
+    async function fetchAdminData() {
+      try {
+        const res = await fetch("/api/admin/items");
+        const json = await res.json();
+        if (!json.success) throw new Error(json.error || "Failed to load data");
+        setData(json);
+      } catch (err: any) {
+        setError(err.message);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     }
-
-    fetchItems();
+    fetchAdminData();
   }, []);
 
-  // 🧩 Delete an item
   const handleDelete = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this report?")) return;
-
-    const { error } = await supabase.from("items").delete().eq("id", id);
-
-    if (error) {
-      alert("❌ Failed to delete item");
-    } else {
-      setItems(items.filter((i) => i.id !== id));
-      alert("✅ Report deleted successfully");
+    if (!confirm("Are you sure you want to delete this item?")) return;
+    try {
+      const res = await fetch(`/api/admin/items/${id}`, { method: "DELETE" });
+      const json = await res.json();
+      if (json.success) {
+        alert("✅ Item deleted successfully");
+        setData((prev: any) => ({
+          ...prev,
+          items: prev.items.filter((i: any) => i.id !== id),
+        }));
+      } else alert("❌ Delete failed: " + json.error);
+    } catch {
+      alert("Something went wrong while deleting.");
     }
   };
 
-  // 🧩 Update an item
-  const handleUpdate = async () => {
-    if (!selectedItem) return;
-    const { id, ...fields } = selectedItem;
-
-    const { error } = await supabase.from("items").update(fields).eq("id", id);
-
-    if (error) {
-      alert("❌ Update failed: " + error.message);
-    } else {
-      alert("✅ Item updated successfully!");
-      setEditing(false);
+  const handleStatusChange = async (id: string, newStatus: string) => {
+    try {
+      const res = await fetch(`/api/admin/items/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        setData((prev: any) => ({
+          ...prev,
+          items: prev.items.map((i: any) =>
+            i.id === id ? { ...i, status: newStatus } : i
+          ),
+        }));
+      } else {
+        alert("❌ Failed to update status");
+      }
+    } catch {
+      alert("Error updating status");
     }
   };
 
-  if (loading) {
-    return (
-      <div className="text-center text-gray-700 dark:text-gray-300 p-8">
-        Loading Admin Dashboard...
-      </div>
-    );
-  }
+  if (loading) return <div className="p-6 text-center">Loading dashboard...</div>;
+  if (error) return <div className="text-red-500 text-center">{error}</div>;
+
+  const { items = [] } = data;
 
   return (
-    <div className="max-w-7xl mx-auto p-6">
-      <h1 className="text-3xl font-bold mb-6 text-ubBlue dark:text-ubGold">
-        Admin Dashboard
-      </h1>
-
-      <h2 className="text-2xl font-semibold mb-3 flex items-center gap-2">
-        📦 Reported Items
-        <span className="text-sm text-gray-500 dark:text-gray-400">
-          ({items.length} total)
+    <div className="relative max-w-7xl mx-auto p-6">
+      {/* Header */}
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-3xl font-bold text-ubBlue dark:text-ubGold">
+          Admin Dashboard
+        </h1>
+        <span className="bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200 px-4 py-2 rounded-full text-sm font-medium flex items-center gap-2 shadow-sm">
+          ⭐ Admin Mode Active
         </span>
-      </h2>
-
-      {/* 🧾 Items Table */}
-      <div className="overflow-x-auto bg-white dark:bg-gray-800 rounded-xl shadow border border-gray-200 dark:border-gray-700">
-        <table className="w-full border-collapse">
-          <thead className="bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100">
-            <tr>
-              <th className="p-3 text-left">Name</th>
-              <th className="p-3 text-left">Status</th>
-              <th className="p-3 text-left">Campus</th>
-              <th className="p-3 text-left">Reporter</th>
-              <th className="p-3 text-left">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((item) => (
-              <tr
-                key={item.id}
-                className="border-t dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 transition"
-              >
-                <td className="p-3">{item.name}</td>
-                <td
-                  className={`p-3 font-semibold ${
-                    item.status === "Found"
-                      ? "text-green-600 dark:text-green-400"
-                      : "text-red-600 dark:text-red-400"
-                  }`}
-                >
-                  {item.status}
-                </td>
-                <td className="p-3">{item.campus}</td>
-                <td className="p-3">
-                  {item.reporter_name}
-                  <br />
-                  <span className="text-sm text-gray-500">
-                    {item.reporter_email}
-                  </span>
-                </td>
-                <td className="p-3 flex gap-2">
-                  <button
-                    onClick={() => {
-                      setSelectedItem(item);
-                      setEditing(false);
-                    }}
-                    className="text-blue-600 hover:underline"
-                  >
-                    View
-                  </button>
-                  <button
-                    onClick={() => {
-                      setSelectedItem(item);
-                      setEditing(true);
-                    }}
-                    className="text-yellow-600 hover:underline"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => handleDelete(item.id)}
-                    className="text-red-600 hover:underline"
-                  >
-                    Delete
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
       </div>
 
-      {/* 🧩 Modal */}
+      {/* Items Table */}
+      <section className="mb-10">
+        <h2 className="text-2xl font-semibold mb-3">
+          📦 Reported Items ({items.length})
+        </h2>
+
+        <div className="overflow-x-auto bg-white dark:bg-gray-800 rounded-xl shadow border border-gray-200 dark:border-gray-700">
+          <table className="w-full border-collapse">
+            <thead className="bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100">
+              <tr>
+                <th className="p-3 text-left">Name</th>
+                <th className="p-3 text-left">Status</th>
+                <th className="p-3 text-left">Campus</th>
+                <th className="p-3 text-left">Reporter</th>
+                <th className="p-3 text-left">Reported At</th>
+                <th className="p-3 text-left">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item: any) => (
+                <tr
+                  key={item.id}
+                  onClick={() => setSelectedItem(item)}
+                  className="border-t dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-900 cursor-pointer transition"
+                >
+                  <td className="p-3">{item.name}</td>
+
+                  {/* Status Dropdown */}
+                  <td className="p-3">
+                    <select
+                      value={item.status}
+                      onChange={(e) =>
+                        handleStatusChange(item.id, e.target.value)
+                      }
+                      className="bg-transparent border border-gray-300 dark:border-gray-600 rounded px-2 py-1 text-sm focus:ring-2 focus:ring-blue-400"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <option value="Lost">Lost</option>
+                      <option value="Found">Found</option>
+                      <option value="Claimed">Claimed</option>
+                    </select>
+                  </td>
+
+                  <td className="p-3">{item.campus}</td>
+                  <td className="p-3">
+                    {item.reporter_name || item.reporter_email}
+                  </td>
+                  <td className="p-3">
+                    {new Date(item.reported_at).toLocaleDateString()}
+                  </td>
+
+                  <td className="p-3">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDelete(item.id);
+                      }}
+                      className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded"
+                    >
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {/* 🧾 Report Details Card */}
       {selectedItem && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-          <div className="bg-white dark:bg-gray-900 rounded-xl shadow-lg max-w-lg w-full p-6 relative">
+        <div className="fixed inset-0 flex items-center justify-center z-[2100]">
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setSelectedItem(null)} />
+          <div className="relative bg-white dark:bg-gray-800 rounded-2xl p-6 w-[90%] max-w-md shadow-2xl z-[2200]">
+            <h3 className="text-xl font-semibold border-b border-gray-200 dark:border-gray-700 pb-2 mb-3">
+              🧾 Report Details
+            </h3>
+            <div className="space-y-2 text-sm sm:text-base">
+              <p><strong>Item Name:</strong> {selectedItem.name}</p>
+              <p><strong>Status:</strong> {selectedItem.status}</p>
+              <p><strong>Category:</strong> {selectedItem.category || "N/A"}</p>
+              <p><strong>Campus:</strong> {selectedItem.campus}</p>
+              <p><strong>Location:</strong> {selectedItem.location || "N/A"}</p>
+              <p><strong>Reporter Name:</strong> {selectedItem.reporter_name || "N/A"}</p>
+              <p><strong>Reporter Email:</strong> {selectedItem.reporter_email || "N/A"}</p>
+              <p><strong>Description:</strong> {selectedItem.description || "No description"}</p>
+              <p><strong>Reported On:</strong> {new Date(selectedItem.reported_at).toLocaleString()}</p>
+            </div>
             <button
               onClick={() => setSelectedItem(null)}
-              className="absolute top-3 right-4 text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+              className="w-full mt-4 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg"
             >
-              ✕
+              Close
             </button>
-
-            {!editing ? (
-              <>
-                <h3 className="text-2xl font-bold mb-4">
-                  {selectedItem.name || "Unnamed Item"}
-                </h3>
-                {selectedItem.image && (
-                  <img
-                    src={selectedItem.image}
-                    alt={selectedItem.name}
-                    className="rounded-lg mb-4"
-                  />
-                )}
-                <p className="text-gray-700 dark:text-gray-300 mb-2">
-                  <strong>Description:</strong>{" "}
-                  {selectedItem.description || "No description"}
-                </p>
-                <p className="text-gray-700 dark:text-gray-300 mb-2">
-                  <strong>Status:</strong> {selectedItem.status}
-                </p>
-                <p className="text-gray-700 dark:text-gray-300 mb-2">
-                  <strong>Campus:</strong> {selectedItem.campus}
-                </p>
-                <p className="text-gray-700 dark:text-gray-300 mb-2">
-                  <strong>Reporter:</strong> {selectedItem.reporter_name} (
-                  {selectedItem.reporter_email})
-                </p>
-              </>
-            ) : (
-              <>
-                <h3 className="text-xl font-semibold mb-3">✏️ Edit Item</h3>
-                <input
-                  type="text"
-                  value={selectedItem.name}
-                  onChange={(e) =>
-                    setSelectedItem({ ...selectedItem, name: e.target.value })
-                  }
-                  className="w-full mb-2 p-2 border rounded"
-                />
-                <select
-                  value={selectedItem.status}
-                  onChange={(e) =>
-                    setSelectedItem({ ...selectedItem, status: e.target.value })
-                  }
-                  className="w-full mb-2 p-2 border rounded"
-                >
-                  <option value="Lost">Lost</option>
-                  <option value="Found">Found</option>
-                </select>
-                <textarea
-                  value={selectedItem.description || ""}
-                  onChange={(e) =>
-                    setSelectedItem({
-                      ...selectedItem,
-                      description: e.target.value,
-                    })
-                  }
-                  className="w-full mb-2 p-2 border rounded"
-                  placeholder="Description"
-                ></textarea>
-                <button
-                  onClick={handleUpdate}
-                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded mr-2"
-                >
-                  Save
-                </button>
-                <button
-                  onClick={() => setEditing(false)}
-                  className="bg-gray-300 hover:bg-gray-400 text-gray-800 px-4 py-2 rounded"
-                >
-                  Cancel
-                </button>
-              </>
-            )}
           </div>
         </div>
       )}

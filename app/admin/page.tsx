@@ -13,32 +13,26 @@ export default function AdminPage() {
   useEffect(() => {
     async function checkAccess() {
       try {
-        // 1️⃣ First, check if a Supabase user is logged in
         const {
           data: { user },
         } = await supabase.auth.getUser();
 
-        // 2️⃣ Check for Supabase admin
+        // ✅ Check Supabase metadata
         if (user?.user_metadata?.role === "admin") {
           setIsAdmin(true);
-          setLoading(false);
           return;
         }
 
-        // 3️⃣ Otherwise, check for manual admin login stored in localStorage
-        const localAdmin = localStorage.getItem("isManualAdmin");
-        if (localAdmin === "true") {
+        // ✅ Local admin override
+        if (localStorage.getItem("isManualAdmin") === "true") {
           setIsAdmin(true);
-          setLoading(false);
           return;
         }
 
-        // 🚫 No valid access
         alert("Access denied. Admins only.");
         router.push("/login");
       } catch (err) {
-        console.error("Error checking admin access:", err);
-        alert("Something went wrong while verifying access.");
+        console.error("Admin access error:", err);
         router.push("/login");
       } finally {
         setLoading(false);
@@ -50,13 +44,17 @@ export default function AdminPage() {
 
   if (loading) {
     return (
-      <div className="flex justify-center items-center h-64 text-lg text-gray-600 dark:text-gray-300">
-        Checking admin access...
+      <div className="flex justify-center items-center h-[70vh] text-lg text-gray-600 dark:text-gray-300">
+        Verifying admin access...
       </div>
     );
   }
 
   if (!isAdmin) return null;
 
-  return <AdminDashboard />;
+  return (
+    <section className="animate-fade-in">
+      <AdminDashboard />
+    </section>
+  );
 }
