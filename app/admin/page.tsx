@@ -15,20 +15,42 @@ export default function AdminPage() {
       try {
         const {
           data: { user },
+          error,
         } = await supabase.auth.getUser();
 
-        // ✅ Check Supabase metadata
-        if (user?.user_metadata?.role === "admin") {
+        if (error || !user) {
+          alert("You must be logged in.");
+          router.push("/login");
+          return;
+        }
+
+        // ✅ Fetch the role from your `profiles` table
+        const { data: profile, error: profileError } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", user.id)
+          .single();
+
+        if (profileError) {
+          console.error("Profile fetch error:", profileError);
+          alert("Unable to verify your account role.");
+          router.push("/login");
+          return;
+        }
+
+        // ✅ Check if user is admin
+        if (profile?.role === "admin") {
           setIsAdmin(true);
           return;
         }
 
-        // ✅ Local admin override
+        // ✅ Local override (manual admin)
         if (localStorage.getItem("isManualAdmin") === "true") {
           setIsAdmin(true);
           return;
         }
 
+        // 🚫 Not admin
         alert("Access denied. Admins only.");
         router.push("/login");
       } catch (err) {
