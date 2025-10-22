@@ -43,11 +43,20 @@ export default function Navbar() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [isManualAdmin, setIsManualAdmin] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const [toast, setToast] = useState("");
 
   useEffect(() => {
     if (typeof window !== "undefined") {
       const adminFlag = localStorage.getItem("isManualAdmin");
       setIsManualAdmin(!!adminFlag);
+
+      // ✅ Safety cleanup: if logged-in user exists, clear old admin flag
+      supabase.auth.getUser().then(({ data: { user } }) => {
+        if (user && adminFlag) {
+          localStorage.removeItem("isManualAdmin");
+          setIsManualAdmin(false);
+        }
+      });
 
       const handleScroll = () => setScrolled(window.scrollY > 10);
       window.addEventListener("scroll", handleScroll);
@@ -56,9 +65,22 @@ export default function Navbar() {
   }, []);
 
   const handleLogout = async () => {
-    localStorage.removeItem("isManualAdmin");
-    await supabase.auth.signOut();
-    router.push("/login");
+    try {
+      // ✅ Always clear manual admin flag first
+      localStorage.removeItem("isManualAdmin");
+      setIsManualAdmin(false);
+
+      await supabase.auth.signOut();
+
+      // ✅ Small confirmation toast
+      setToast("✅ You’ve been logged out");
+      setTimeout(() => {
+        setToast("");
+        window.location.href = "/login"; // full redirect for clean session
+      }, 1200);
+    } catch (err) {
+      console.error("Logout error:", err);
+    }
   };
 
   const userRole = user?.user_metadata?.role;
@@ -218,6 +240,20 @@ export default function Navbar() {
               </nav>
             </motion.div>
           </>
+        )}
+      </AnimatePresence>
+
+      {/* 🔔 Logout Toast */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            initial={{ opacity: 0, y: 50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 50 }}
+            className="fixed bottom-6 right-6 bg-green-600 text-white px-4 py-2 rounded-lg shadow-lg z-[2000]"
+          >
+            {toast}
+          </motion.div>
         )}
       </AnimatePresence>
     </header>
