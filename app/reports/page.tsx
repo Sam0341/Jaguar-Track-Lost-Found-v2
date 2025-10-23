@@ -1,181 +1,243 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabaseClient";
-import { useRouter } from "next/navigation";
-import { toast, Toaster } from "react-hot-toast";
-
-type Item = {
-  id: string;
-  name: string;
-  description: string;
-  category: string;
-  campus: string;
-  location: string;
-  image: string;
-  status: string;
-  reporter_name: string;
-  reporter_email: string;
-  reported_at: string;
-};
+import {
+  PieChart,
+  Pie,
+  Cell,
+  Tooltip,
+  ResponsiveContainer,
+  Legend,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+} from "recharts";
+import { Download, BarChart2, PieChart as PieChartIcon, Calendar } from "lucide-react";
 
 export default function ReportsPage() {
-  const [items, setItems] = useState<Item[]>([]);
-  const [searchTerm, setSearchTerm] = useState("");
+  const [items, setItems] = useState<any[]>([]);
+  const [filteredItems, setFilteredItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const router = useRouter();
+  const [error, setError] = useState<string | null>(null);
+  const [chartType, setChartType] = useState<"pie" | "bar">("pie");
+  const [filter, setFilter] = useState("all");
 
-  useEffect(() => {
-    async function fetchItems() {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!user || user.user_metadata?.role !== "admin") {
-        router.push("/");
-        return;
-      }
-
-      const { data, error } = await supabase
-        .from("items")
-        .select("*")
-        .order("reported_at", { ascending: false });
-
-      if (error) {
-        console.error("Error fetching items:", error);
-        toast.error("Failed to load reports");
-      } else {
-        setItems(data || []);
-      }
-
-      setLoading(false);
-    }
-
-    fetchItems();
-  }, [router]);
-
-  // 🔍 Filter logic
-  const filteredItems = items.filter((item) => {
-    const term = searchTerm.toLowerCase();
-    return (
-      item.name.toLowerCase().includes(term) ||
-      (item.reporter_name || "").toLowerCase().includes(term) ||
-      (item.reporter_email || "").toLowerCase().includes(term)
-    );
+  const [stats, setStats] = useState({
+    total: 0,
+    lost: 0,
+    found: 0,
+    claimed: 0,
+    unclaimed: 0,
   });
 
-  async function updateStatus(id: string, newStatus: string) {
-    const { error } = await supabase
-      .from("items")
-      .update({ status: newStatus })
-      .eq("id", id);
-
-    if (!error) {
-      setItems((prev) =>
-        prev.map((item) =>
-          item.id === id ? { ...item, status: newStatus } : item
-        )
-      );
-      toast.success(`Status updated to ${newStatus}`);
-    } else {
-      console.error(error);
-      toast.error("Failed to update status");
+  useEffect(() => {
+    async function fetchData() {
+      try {
+        const res = await fetch("/api/admin/items");
+        const json = await res.json();
+        if (!json.success) throw new Error(json.error || "Failed to load data");
+        setItems(json.items);
+        applyFilter(json.items, "all");
+      } catch (err: any) {
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
     }
-  }
+    fetchData();
+  }, []);
 
-  async function deleteItem(id: string) {
-    if (!confirm("Are you sure you want to delete this item?")) return;
-    const { error } = await supabase.from("items").delete().eq("id", id);
+  const applyFilter = (data: any[], type: string) => {
+    let filtered = [...data];
+    const now = new Date();
 
-    if (!error) {
-      setItems((prev) => prev.filter((item) => item.id !== id));
-      toast.success("Item deleted successfully");
-    } else {
-      console.error(error);
-      toast.error("Failed to delete item");
+    if (type === "week") {
+      const weekAgo = new Date();
+      weekAgo.setDate(now.getDate() - 7);
+      filtered = data.filter((i) => new Date(i.reported_at) >= weekAgo);
+    } else if (type === "month") {
+      const monthAgo = new Date();
+      monthAgo.setMonth(now.getMonth() - 1);
+      filtered = data.filter((i) => new Date(i.reported_at) >= monthAgo);
     }
-  }
+
+    setFilteredItems(filtered);
+    calculateStats(filtered);
+  };
+
+  const calculateStats = (data: any[]) => {
+    const lost = data.filter((i) => i.status.toLowerCase() === "lost").length;
+    const found = data.filter((i) => i.status.toLowerCase() === "found").length;
+    const claimed = data.filter((i) => i.status.toLowerCase() === "claimed").length;
+    const unclaimed = found - claimed < 0 ? 0 : found - claimed;
+    setStats({
+      total: data.length,
+      lost,
+      found,
+      claimed,
+      unclaimed,
+    });
+  };
+
+  const downloadCSV = () => {
+    const header = "Name,Status,Category,Campus,Reporter,Email,Date\n";
+    const rows = filteredItems
+      .map(
+        (i) =>
+          `${i.name},${i.status},${i.category},${i.campus},${i.reporter_name},${i.reporter_email},${i.reported_at}`
+      )
+      .join("\n");
+
+    const blob = new Blob([header + rows], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `UB_LostAndFound_Reports_${filter}.csv`;
+    link.click();
+  };
+
+  const chartData = [
+    { name: "Lost", value: stats.lost, color: "#3B82F6" },
+    { name: "Found", value: stats.found, color: "#FACC15" },
+    { name: "Claimed", value: stats.claimed, color: "#10B981" },
+    { name: "Unclaimed", value: stats.unclaimed, color: "#F97316" },
+  ];
 
   if (loading)
-    return (
-      <div className="text-center text-blue-600 dark:text-ubGold mt-10 animate-pulse">
-        Loading reported items...
-      </div>
-    );
+    return <div className="text-center mt-10 text-blue-600">Loading reports...</div>;
+  if (error)
+    return <div className="text-center mt-10 text-red-500">Error: {error}</div>;
 
   return (
-    <div className="max-w-7xl mx-auto p-6">
-      <Toaster position="bottom-right" toastOptions={{ duration: 3000 }} />
-
-      <h1 className="text-3xl font-bold text-ubBlue dark:text-ubGold mb-6 text-center">
-        Admin Reports Panel
+    <div className="max-w-6xl mx-auto p-6 space-y-10">
+      <h1 className="text-3xl font-bold text-center text-blue-700 dark:text-yellow-400">
+        📊 Lost & Found Reports Overview
       </h1>
 
-      {/* 🔍 Search Bar */}
-      <div className="flex justify-center mb-6">
-        <input
-          type="text"
-          placeholder="Search by item name, reporter name, or email..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="w-full md:w-1/2 p-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-ubGold"
-        />
+      {/* Date Filters */}
+      <div className="flex justify-center gap-3 flex-wrap mb-6">
+        {[
+          { key: "all", label: "All Time" },
+          { key: "month", label: "This Month" },
+          { key: "week", label: "This Week" },
+        ].map((btn) => (
+          <button
+            key={btn.key}
+            onClick={() => {
+              setFilter(btn.key);
+              applyFilter(items, btn.key);
+            }}
+            className={`px-4 py-2 rounded-lg flex items-center gap-2 font-medium transition ${
+              filter === btn.key
+                ? "bg-blue-600 text-white dark:bg-yellow-500 dark:text-gray-900"
+                : "bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 hover:opacity-90"
+            }`}
+          >
+            <Calendar size={16} /> {btn.label}
+          </button>
+        ))}
       </div>
 
-      {filteredItems.length === 0 ? (
-        <p className="text-center text-gray-500 dark:text-gray-400">
-          No reported items found.
-        </p>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="min-w-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm">
-            <thead className="bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100">
-              <tr>
-                <th className="px-4 py-2 text-left">Item Name</th>
-                <th className="px-4 py-2">Status</th>
-                <th className="px-4 py-2">Campus</th>
-                <th className="px-4 py-2">Reporter</th>
-                <th className="px-4 py-2">Email (Admin only)</th>
-                <th className="px-4 py-2">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredItems.map((item) => (
-                <tr
-                  key={item.id}
-                  className="border-t border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 transition"
-                >
-                  <td className="px-4 py-2 font-medium">{item.name}</td>
-                  <td className="px-4 py-2">
-                    <select
-                      value={item.status}
-                      onChange={(e) => updateStatus(item.id, e.target.value)}
-                      className="border border-gray-300 dark:border-gray-600 rounded-md px-2 py-1 text-sm bg-white dark:bg-gray-900"
-                    >
-                      <option value="lost">Lost</option>
-                      <option value="found">Found</option>
-                      <option value="claimed">Claimed</option>
-                    </select>
-                  </td>
-                  <td className="px-4 py-2">{item.campus}</td>
-                  <td className="px-4 py-2">{item.reporter_name || "Unknown"}</td>
-                  <td className="px-4 py-2 text-blue-600 dark:text-ubGold">
-                    {item.reporter_email || "Hidden"}
-                  </td>
-                  <td className="px-4 py-2 flex gap-2">
-                    <button
-                      onClick={() => deleteItem(item.id)}
-                      className="text-red-600 hover:text-red-800 text-sm font-medium"
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {/* Stats Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="p-4 rounded-xl bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300 text-center">
+          <h3 className="text-2xl font-bold">{stats.total}</h3>
+          <p>Total Items</p>
         </div>
-      )}
+        <div className="p-4 rounded-xl bg-yellow-100 dark:bg-yellow-900/40 text-yellow-800 dark:text-yellow-300 text-center">
+          <h3 className="text-2xl font-bold">{stats.found}</h3>
+          <p>Found</p>
+        </div>
+        <div className="p-4 rounded-xl bg-green-100 dark:bg-green-900/40 text-green-800 dark:text-green-300 text-center">
+          <h3 className="text-2xl font-bold">{stats.claimed}</h3>
+          <p>Claimed</p>
+        </div>
+        <div className="p-4 rounded-xl bg-orange-100 dark:bg-orange-900/40 text-orange-800 dark:text-orange-300 text-center">
+          <h3 className="text-2xl font-bold">{stats.unclaimed}</h3>
+          <p>Unclaimed</p>
+        </div>
+      </div>
+
+      {/* Chart Section */}
+      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-6 shadow-md">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-xl font-semibold text-gray-800 dark:text-gray-200">
+            Item Distribution Overview
+          </h2>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setChartType("pie")}
+              className={`px-3 py-1 rounded-md flex items-center gap-1 text-sm font-medium ${
+                chartType === "pie"
+                  ? "bg-blue-600 text-white"
+                  : "bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200"
+              }`}
+            >
+              <PieChartIcon size={16} /> Pie
+            </button>
+            <button
+              onClick={() => setChartType("bar")}
+              className={`px-3 py-1 rounded-md flex items-center gap-1 text-sm font-medium ${
+                chartType === "bar"
+                  ? "bg-blue-600 text-white"
+                  : "bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200"
+              }`}
+            >
+              <BarChart2 size={16} /> Bar
+            </button>
+          </div>
+        </div>
+
+        <div className="w-full h-72">
+          <ResponsiveContainer>
+            {chartType === "pie" ? (
+              <PieChart>
+                <Pie data={chartData} dataKey="value" nameKey="name" outerRadius={110} label>
+                  {chartData.map((entry, i) => (
+                    <Cell key={i} fill={entry.color} />
+                  ))}
+                </Pie>
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: "#1E293B",
+                    borderRadius: "8px",
+                    color: "#fff",
+                  }}
+                />
+                <Legend />
+              </PieChart>
+            ) : (
+              <BarChart data={chartData}>
+                <XAxis dataKey="name" />
+                <YAxis />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: "#1E293B",
+                    borderRadius: "8px",
+                    color: "#fff",
+                  }}
+                />
+                <Bar dataKey="value" radius={[6, 6, 0, 0]}>
+                  {chartData.map((entry, i) => (
+                    <Cell key={i} fill={entry.color} />
+                  ))}
+                </Bar>
+              </BarChart>
+            )}
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* Download CSV */}
+      <div className="text-center">
+        <button
+          onClick={downloadCSV}
+          className="mt-4 inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 dark:bg-yellow-500 dark:hover:bg-yellow-600 text-white dark:text-gray-900 px-5 py-2 rounded-lg font-medium transition"
+        >
+          <Download size={18} /> Download Report
+        </button>
+      </div>
     </div>
   );
 }

@@ -4,76 +4,114 @@ import { useEffect, useState } from "react";
 import { getItemById, type Item } from "@/lib/items";
 import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
+import { useRouter } from "next/navigation";
 
 export default function ItemDetails({ params }: { params: { id: string } }) {
   const [item, setItem] = useState<Item | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
   const [user, setUser] = useState<any>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [showClaimForm, setShowClaimForm] = useState(false);
   const [claimMessage, setClaimMessage] = useState("");
   const [feedback, setFeedback] = useState("");
+  const [claimStatus, setClaimStatus] = useState<string | null>(null);
+  const router = useRouter();
 
+  // 🧠 Fetch item + user + claim status
   useEffect(() => {
-    async function fetchItem() {
+    async function fetchItemData() {
       const { data: userData } = await supabase.auth.getUser();
       const currentUser = userData?.user;
       setUser(currentUser);
+
+      // 👩‍💼 Check if admin
       if (currentUser?.user_metadata?.role === "admin") {
         setIsAdmin(true);
       }
 
+      // 📦 Fetch item
       const data = await getItemById(params.id);
       setItem(data);
+
+      // 🔍 Check if user already made a claim for this item
+      if (currentUser) {
+        const { data: existingClaims, error } = await supabase
+          .from("claims")
+          .select("status")
+          .eq("item_id", params.id)
+          .eq("claimed_by", currentUser.id)
+          .maybeSingle();
+
+        if (!error && existingClaims) {
+          setClaimStatus(existingClaims.status);
+        }
+      }
     }
-    fetchItem();
+
+    fetchItemData();
   }, [params.id]);
 
+  // 📨 Handle claim submission
   const handleClaimSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
     if (!user) {
-      setFeedback("⚠️ Please log in to claim an item.");
+      router.push("/login");
       return;
     }
 
-    try {
-      const { error } = await supabase.from("claims").insert([
-        {
-          item_id: item?.id,
-          claimed_by: user.id,
-          message: claimMessage || null,
-          status: "Pending",
-        },
-      ]);
+    setFeedback("Submitting your claim...");
 
-      if (error) throw error;
-      setFeedback("✅ Claim submitted successfully! Await admin approval.");
-      setClaimMessage("");
-      setShowClaimForm(false);
-    } catch (err: any) {
+    try {
+      // ✅ Get current session
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session) {
+        setFeedback("⚠️ You must be logged in to submit a claim.");
+        return;
+      }
+
+      // ✅ Include Bearer token in headers
+      const res = await fetch("/api/claims", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          item_id: item?.id,
+          message: claimMessage,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (data.success) {
+        setFeedback("✅ Claim submitted successfully! Awaiting admin approval.");
+        setClaimStatus("Pending");
+        setShowClaimForm(false);
+      } else {
+        setFeedback(`❌ ${data.error || "Failed to submit claim."}`);
+      }
+    } catch (err) {
       console.error("Claim error:", err);
       setFeedback("❌ Failed to submit claim. Please try again.");
     }
   };
 
-  if (!item) {
-    return (
-      <div className="flex items-center justify-center h-64 text-gray-500 dark:text-gray-400">
-        Loading item details...
-      </div>
-    );
-  }
-
+  // 🖼️ Image handling
   const SUPABASE_URL =
     "https://npudlbublntelxzmzlmu.supabase.co/storage/v1/object/public/item-photos";
-  const imageSrc = item.image
+  const imageSrc = item?.image
     ? item.image.startsWith("http")
       ? item.image
       : `${SUPABASE_URL}/${item.image}`
     : "https://placehold.co/600x400?text=No+Image+Available";
 
-  const formatDateTime = (timestamp: string) => {
-    const date = new Date(timestamp);
-    return date.toLocaleString("en-US", {
+  // ⏰ Format time nicely
+  const formatDateTime = (timestamp: string) =>
+    new Date(timestamp).toLocaleString("en-US", {
       weekday: "short",
       month: "long",
       day: "numeric",
@@ -82,12 +120,18 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
       minute: "2-digit",
       hour12: true,
     });
-  };
+
+  if (!item)
+    return (
+      <div className="flex items-center justify-center h-64 text-gray-500 dark:text-gray-400">
+        Loading item details...
+      </div>
+    );
 
   return (
     <div className="container mx-auto px-4 py-6">
       <div className="grid md:grid-cols-2 gap-6">
-        {/* 🖼️ Image Section */}
+        {/* 🖼️ Image */}
         <div className="rounded-2xl overflow-hidden bg-gray-100 dark:bg-gray-800">
           <img
             src={imageSrc}
@@ -101,8 +145,8 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
           />
         </div>
 
-        {/* 📋 Info Section */}
-        <div className="bg-white dark:bg-gray-900 rounded-2xl p-6 shadow-sm border border-gray-200 dark:border-gray-700">
+        {/* 🧾 Details */}
+        <div className="bg-white dark:bg-gray-900 rounded-2xl p-6 shadow border border-gray-200 dark:border-gray-700">
           <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
             {item.name}
           </h1>
@@ -136,19 +180,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
           {/* 👤 Reporter Info */}
           <div className="mt-4 text-sm text-gray-500 dark:text-gray-400 space-y-1">
             <p>
-              <strong>Reported by:</strong>{" "}
-              {item.reporter_name ? (
-                <>
-                  {item.reporter_name}
-                  {isAdmin && item.reporter_email && (
-                    <span className="text-blue-600 dark:text-blue-400 ml-2">
-                      ({item.reporter_email})
-                    </span>
-                  )}
-                </>
-              ) : (
-                "Unknown"
-              )}
+              <strong>Reported by:</strong> {item.reporter_name || "Unknown"}
             </p>
             <p>
               <strong>Reported on:</strong>{" "}
@@ -156,17 +188,33 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
             </p>
           </div>
 
-          {/* 🧾 Claim Button */}
+          {/* 🎯 Claim Section */}
           {!isAdmin && item.status !== "claimed" && (
-            <button
-              onClick={() => setShowClaimForm(!showClaimForm)}
-              className="mt-6 w-full bg-ubBlue text-white py-2 rounded-lg hover:opacity-90 transition"
-            >
-              {showClaimForm ? "Cancel" : "Claim This Item"}
-            </button>
+            <>
+              {claimStatus === "Pending" ? (
+                <p className="mt-6 text-yellow-600 font-medium text-center">
+                  🕒 Your claim is pending admin approval.
+                </p>
+              ) : claimStatus === "Approved" ? (
+                <p className="mt-6 text-green-600 font-medium text-center">
+                  ✅ Your claim has been approved! Please collect it from the secretary.
+                </p>
+              ) : claimStatus === "Rejected" ? (
+                <p className="mt-6 text-red-600 font-medium text-center">
+                  ❌ Your claim was rejected. Please contact the secretary for details.
+                </p>
+              ) : (
+                <button
+                  onClick={() => setShowClaimForm(!showClaimForm)}
+                  className="mt-6 w-full bg-ubBlue text-white py-2 rounded-lg hover:opacity-90 transition"
+                >
+                  {showClaimForm ? "Cancel" : "Claim This Item"}
+                </button>
+              )}
+            </>
           )}
 
-          {/* ✍️ Claim Form */}
+          {/* 📝 Claim Form */}
           {showClaimForm && (
             <form
               onSubmit={handleClaimSubmit}
@@ -202,7 +250,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
             </p>
           )}
 
-          {/* 🔙 Back */}
+          {/* 🔙 Back Button */}
           <Link
             href="/items"
             className="mt-6 inline-block bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-5 py-2 rounded-lg transition"

@@ -16,7 +16,7 @@ export default function ReportForm() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // 🧠 Auto-fill user info from Supabase
+  // 🧠 Auto-fill user info
   useEffect(() => {
     async function fetchUserInfo() {
       const { data: authData } = await supabase.auth.getUser();
@@ -32,7 +32,6 @@ export default function ReportForm() {
         if (profile?.full_name) setReporterName(profile.full_name);
       }
     }
-
     fetchUserInfo();
   }, []);
 
@@ -51,7 +50,6 @@ export default function ReportForm() {
       return;
     }
 
-    // ✅ Capitalize the first letter of the status to match DB constraint
     const properStatus =
       status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
 
@@ -73,7 +71,7 @@ export default function ReportForm() {
       setDescription("");
       setCategory("");
       setCampus("");
-      setStatus("lost"); // Reset to Lost (default)
+      setStatus("lost");
       setImage(null);
     } else {
       setMessage("❌ Failed to submit report. Try again.");
@@ -85,10 +83,10 @@ export default function ReportForm() {
   return (
     <form
       onSubmit={handleSubmit}
-      className="max-w-2xl mx-auto p-6 bg-white shadow-lg rounded-2xl space-y-5"
+      className="max-w-2xl mx-auto p-6 bg-white dark:bg-gray-900 shadow-lg rounded-2xl space-y-5 transition-colors duration-300"
     >
-      <h2 className="text-2xl font-bold text-center text-blue-700">
-        
+      <h2 className="text-2xl font-bold text-center text-blue-700 dark:text-blue-400">
+      
       </h2>
 
       {/* Item Name */}
@@ -97,7 +95,7 @@ export default function ReportForm() {
         value={itemName}
         onChange={(e) => setItemName(e.target.value)}
         placeholder="Item name"
-        className="border p-2 w-full rounded-lg focus:ring-2 focus:ring-blue-400 outline-none"
+        className="border dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 p-2 w-full rounded-lg focus:ring-2 focus:ring-blue-400 outline-none"
         required
       />
 
@@ -106,17 +104,19 @@ export default function ReportForm() {
         value={description}
         onChange={(e) => setDescription(e.target.value)}
         placeholder="Description"
-        className="border p-2 w-full rounded-lg h-24 focus:ring-2 focus:ring-blue-400 outline-none"
+        className="border dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 p-2 w-full rounded-lg h-24 focus:ring-2 focus:ring-blue-400 outline-none"
         required
       />
 
       {/* Category Dropdown */}
       <div>
-        <label className="block mb-1 font-medium text-gray-700">Category</label>
+        <label className="block mb-1 font-medium text-gray-700 dark:text-gray-300">
+          Category
+        </label>
         <select
           value={category}
           onChange={(e) => setCategory(e.target.value)}
-          className="border p-2 w-full rounded-lg focus:ring-2 focus:ring-blue-400 outline-none"
+          className="border dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 p-2 w-full rounded-lg focus:ring-2 focus:ring-blue-400 outline-none"
           required
         >
           <option value="">Select a category</option>
@@ -133,11 +133,13 @@ export default function ReportForm() {
 
       {/* Campus Dropdown */}
       <div>
-        <label className="block mb-1 font-medium text-gray-700">Campus</label>
+        <label className="block mb-1 font-medium text-gray-700 dark:text-gray-300">
+          Campus
+        </label>
         <select
           value={campus}
           onChange={(e) => setCampus(e.target.value)}
-          className="border p-2 w-full rounded-lg focus:ring-2 focus:ring-blue-400 outline-none"
+          className="border dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 p-2 w-full rounded-lg focus:ring-2 focus:ring-blue-400 outline-none"
           required
         >
           <option value="">Select a campus</option>
@@ -152,11 +154,13 @@ export default function ReportForm() {
 
       {/* Status Dropdown */}
       <div>
-        <label className="block mb-1 font-medium text-gray-700">Status</label>
+        <label className="block mb-1 font-medium text-gray-700 dark:text-gray-300">
+          Status
+        </label>
         <select
           value={status}
           onChange={(e) => setStatus(e.target.value)}
-          className="border p-2 w-full rounded-lg focus:ring-2 focus:ring-blue-400 outline-none"
+          className="border dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 p-2 w-full rounded-lg focus:ring-2 focus:ring-blue-400 outline-none"
           required
         >
           <option value="found">Found</option>
@@ -171,27 +175,27 @@ export default function ReportForm() {
           value={reporterName}
           onChange={(e) => setReporterName(e.target.value)}
           placeholder="Your name"
-          className="border p-2 w-full rounded-lg focus:ring-2 focus:ring-blue-400 outline-none"
+          className="border dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 p-2 w-full rounded-lg focus:ring-2 focus:ring-blue-400 outline-none"
         />
         <input
           type="email"
           value={reporterEmail}
           onChange={(e) => setReporterEmail(e.target.value)}
           placeholder="Your UB email"
-          className="border p-2 w-full rounded-lg focus:ring-2 focus:ring-blue-400 outline-none"
+          className="border dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 p-2 w-full rounded-lg focus:ring-2 focus:ring-blue-400 outline-none"
         />
       </div>
 
       {/* Image Upload */}
       <div>
-        <label className="block mb-1 font-medium text-gray-700">
+        <label className="block mb-1 font-medium text-gray-700 dark:text-gray-300">
           Image (optional)
         </label>
         <input
           type="file"
           accept="image/*"
           onChange={(e) => setImage(e.target.files?.[0] || null)}
-          className="border p-2 w-full rounded-lg"
+          className="border dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 p-2 w-full rounded-lg"
         />
       </div>
 
@@ -199,19 +203,20 @@ export default function ReportForm() {
       <button
         disabled={loading}
         type="submit"
-        className="w-full bg-blue-600 text-white py-2 rounded-lg font-medium hover:bg-blue-700 transition"
+        className="w-full bg-blue-600 dark:bg-blue-500 text-white py-2 rounded-lg font-medium hover:bg-blue-700 dark:hover:bg-blue-600 transition"
       >
         {loading ? "Submitting..." : "Submit Report"}
       </button>
 
+      {/* Message */}
       {message && (
         <p
           className={`text-center font-medium ${
             message.includes("✅")
-              ? "text-green-600"
+              ? "text-green-600 dark:text-green-400"
               : message.includes("⚠️")
-              ? "text-yellow-600"
-              : "text-red-600"
+              ? "text-yellow-600 dark:text-yellow-400"
+              : "text-red-600 dark:text-red-400"
           }`}
         >
           {message}
