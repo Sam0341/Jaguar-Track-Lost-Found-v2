@@ -28,7 +28,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
         setIsAdmin(true);
       }
 
-      // 📦 Fetch item
+      // 📦 Fetch item details
       const data = await getItemById(params.id);
       setItem(data);
 
@@ -62,22 +62,11 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
     setFeedback("Submitting your claim...");
 
     try {
-      // ✅ Get current session
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (!session) {
-        setFeedback("⚠️ You must be logged in to submit a claim.");
-        return;
-      }
-
-      // ✅ Include Bearer token in headers
+      // ✅ Cookie-based auth — no need for Authorization header
       const res = await fetch("/api/claims", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
         },
         body: JSON.stringify({
           item_id: item?.id,
@@ -197,11 +186,13 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
                 </p>
               ) : claimStatus === "Approved" ? (
                 <p className="mt-6 text-green-600 font-medium text-center">
-                  ✅ Your claim has been approved! Please collect it from the secretary.
+                  ✅ Your claim has been approved! Please collect it from the
+                  secretary.
                 </p>
               ) : claimStatus === "Rejected" ? (
                 <p className="mt-6 text-red-600 font-medium text-center">
-                  ❌ Your claim was rejected. Please contact the secretary for details.
+                  ❌ Your claim was rejected. Please contact the secretary for
+                  details.
                 </p>
               ) : (
                 <button
