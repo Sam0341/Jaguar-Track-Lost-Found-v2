@@ -1,54 +1,58 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
-import { cookies, headers } from "next/headers";
+import { cookies } from "next/headers";
 
 export async function POST(req: Request) {
-  const supabase = createRouteHandlerClient({ cookies });
-  const authHeader = headers().get("authorization");
-  const token = authHeader?.replace("Bearer ", "");
+  try {
+    const supabase = createRouteHandlerClient({ cookies });
 
-  let user = null;
-
-  const supabaseServer = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
-
-  // ✅ If token present, fetch user from Supabase Auth
-  if (token) {
-    const { data, error } = await supabaseServer.auth.getUser(token);
-    if (error) console.error("Auth error:", error.message);
-    user = data?.user;
-  }
-
-  // ✅ Fallback to cookie auth
-  if (!user) {
+    // 🧠 Get the current authenticated user
     const {
-      data: { user: cookieUser },
+      data: { user },
+      error: userError,
     } = await supabase.auth.getUser();
-    user = cookieUser;
+
+    if (userError || !user) {
+      return NextResponse.json(
+        { success: false, error: "Unauthorized" },
+        { status: 401 }
+      );
+    }
+
+    // 📦 Parse request body
+    const { item_id, message } = await req.json();
+
+    if (!item_id) {
+      return NextResponse.json(
+        { success: false, error: "Missing item_id" },
+        { status: 400 }
+      );
+    }
+
+    // 🧾 Insert the claim
+    const { error } = await supabase.from("claims").insert([
+      {
+        item_id,
+        claimed_by: user.id, // ✅ this is the fix
+        message,
+        status: "Pending",
+      },
+    ]);
+
+    if (error) {
+      console.error("Claim insert error:", error);
+      return NextResponse.json(
+        { success: false, error: error.message },
+        { status: 400 }
+      );
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    console.error("Unexpected error:", err);
+    return NextResponse.json(
+      { success: false, error: "Internal server error" },
+      { status: 500 }
+    );
   }
-
-  if (!user)
-    return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
-
-  const { item_id, message } = await req.json();
-
-  const { error: insertError } = await supabase
-    .from("claims")
-    .insert({
-      item_id,
-      claimed_by: user.id,
-      message,
-      status: "Pending",
-      created_at: new Date().toISOString(),
-    });
-
-  if (insertError) {
-    console.error("DB error:", insertError.message);
-    return NextResponse.json({ success: false, error: "Database insert failed" }, { status: 500 });
-  }
-
-  return NextResponse.json({ success: true });
 }
