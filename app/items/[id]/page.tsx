@@ -62,12 +62,13 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
     setFeedback("Submitting your claim...");
 
     try {
-      // ✅ Cookie-based auth — no need for Authorization header
+      // ✅ Send session cookies along with the request
       const res = await fetch("/api/claims", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
+        credentials: "include", // 🔑 ensures Supabase cookies are sent to API route
         body: JSON.stringify({
           item_id: item?.id,
           message: claimMessage,

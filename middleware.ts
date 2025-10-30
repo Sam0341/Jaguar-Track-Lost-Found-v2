@@ -6,16 +6,16 @@ import type { NextRequest } from "next/server";
 export async function middleware(req: NextRequest) {
   const res = NextResponse.next();
 
-  // ✅ Initialize Supabase with cookie-aware middleware
+  // 🔐 Create Supabase client tied to the request
   const supabase = createMiddlewareClient({ req, res });
 
-  // Refresh or load existing session
+  // 🧠 Refresh or validate the user's session
   await supabase.auth.getSession();
 
   return res;
 }
 
-// ✅ This matcher skips Next.js static assets but includes all API and app routes
+// ✅ Runs on everything except static assets
 export const config = {
   matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
 };
