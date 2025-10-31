@@ -2,57 +2,57 @@ import { NextResponse } from "next/server";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { cookies } from "next/headers";
 
-export async function POST(req: Request) {
+export async function PUT(req: Request, { params }: { params: { id: string } }) {
   try {
     const supabase = createRouteHandlerClient({ cookies });
 
     const {
       data: { user },
-      error: userError,
     } = await supabase.auth.getUser();
 
-    if (userError || !user) {
-      return NextResponse.json(
-        { success: false, error: "Unauthorized – no valid session" },
-        { status: 401 }
-      );
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { item_id, message } = await req.json();
+    const { status } = await req.json();
 
-    if (!item_id) {
-      return NextResponse.json(
-        { success: false, error: "Missing item_id" },
-        { status: 400 }
-      );
+    const { error } = await supabase
+      .from("claims")
+      .update({ status })
+      .eq("id", params.id);
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
-    const { error: insertError } = await supabase.from("claims").insert([
-      {
-        item_id,
-        claimed_by: user.id,
-        message: message || "",
-        status: "Pending",
-      },
-    ]);
-
-    if (insertError) {
-      console.error("Claim insert error:", insertError);
-      return NextResponse.json(
-        { success: false, error: insertError.message },
-        { status: 400 }
-      );
-    }
-
-    return NextResponse.json({
-      success: true,
-      message: "Claim submitted successfully.",
-    });
+    return NextResponse.json({ success: true, message: "Claim updated" });
   } catch (err) {
-    console.error("Unexpected error:", err);
-    return NextResponse.json(
-      { success: false, error: "Internal server error" },
-      { status: 500 }
-    );
+    console.error(err);
+    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: Request, { params }: { params: { id: string } }) {
+  try {
+    const supabase = createRouteHandlerClient({ cookies });
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const { error } = await supabase.from("claims").delete().eq("id", params.id);
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+
+    return NextResponse.json({ success: true, message: "Claim deleted" });
+  } catch (err) {
+    console.error(err);
+    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
 }
