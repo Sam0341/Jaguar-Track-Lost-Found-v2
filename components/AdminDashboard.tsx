@@ -1,180 +1,375 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { supabase } from "@/lib/supabaseClient";
 
 export default function AdminDashboard() {
-  const [data, setData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [tab, setTab] = useState<"items" | "claims">("items");
+  const [items, setItems] = useState<any[]>([]);
+  const [claims, setClaims] = useState<any[]>([]);
   const [selectedItem, setSelectedItem] = useState<any>(null);
+  const [loadingItems, setLoadingItems] = useState(true);
+  const [loadingClaims, setLoadingClaims] = useState(true);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [adminEmail, setAdminEmail] = useState<string | null>(null);
 
+  // 🔑 Fetch current admin
   useEffect(() => {
-    async function fetchAdminData() {
-      try {
-        const res = await fetch("/api/admin/items");
-        const json = await res.json();
-        if (!json.success) throw new Error(json.error || "Failed to load data");
-        setData(json);
-      } catch (err: any) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
+    async function fetchAdmin() {
+      const { data, error } = await supabase.auth.getUser();
+      if (!error && data?.user) {
+        setAdminEmail(data.user.email);
       }
     }
-    fetchAdminData();
+    fetchAdmin();
   }, []);
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this item?")) return;
-    try {
-      const res = await fetch(`/api/admin/items/${id}`, { method: "DELETE" });
-      const json = await res.json();
-      if (json.success) {
-        alert("✅ Item deleted successfully");
-        setData((prev: any) => ({
-          ...prev,
-          items: prev.items.filter((i: any) => i.id !== id),
-        }));
-      } else alert("❌ Delete failed: " + json.error);
-    } catch {
-      alert("Something went wrong while deleting.");
-    }
-  };
+  // 🧩 Fetch Items
+  useEffect(() => {
+    fetchItems();
+  }, []);
 
-  const handleStatusChange = async (id: string, newStatus: string) => {
+  async function fetchItems() {
+    setLoadingItems(true);
+    const { data, error } = await supabase
+      .from("items")
+      .select("*")
+      .order("reported_at", { ascending: false });
+    if (!error) setItems(data || []);
+    setLoadingItems(false);
+  }
+
+  // 🧾 Fetch Claims
+  useEffect(() => {
+    async function fetchClaims() {
+      const { data, error } = await supabase
+        .from("claims")
+        .select(
+          `
+          id,
+          item_id,
+          message,
+          status,
+          created_at,
+          claimed_by ( email ),
+          items ( name, campus, status )
+        `
+        )
+        .order("created_at", { ascending: false });
+      if (!error) setClaims(data || []);
+      setLoadingClaims(false);
+    }
+    fetchClaims();
+  }, []);
+
+  // 📅 Format date
+  const formatDate = (date: string) =>
+    new Date(date).toLocaleDateString("en-BZ", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+
+  // ⚙️ Handle Status Update
+  async function handleUpdateStatus(status: string) {
+    if (!selectedItem) return;
+    setActionLoading(true);
+
+    const { error: updateError } = await supabase
+      .from("items")
+      .update({ status })
+      .eq("id", selectedItem.id);
+
+    if (updateError) {
+      alert("Error updating status: " + updateError.message);
+      setActionLoading(false);
+      return;
+    }
+
+    // ✅ Auto-create a claim when marked as Claimed
+    if (status === "Claimed" && adminEmail) {
+      await handleAutoClaim(selectedItem.id);
+    }
+
+    alert(`Item marked as ${status}!`);
+    setSelectedItem({ ...selectedItem, status });
+    fetchItems();
+    setActionLoading(false);
+  }
+
+  // 🧠 Auto Claim creation
+  async function handleAutoClaim(itemId: string) {
     try {
-      const res = await fetch(`/api/admin/items/${id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: newStatus }),
-      });
-      const json = await res.json();
-      if (json.success) {
-        setData((prev: any) => ({
-          ...prev,
-          items: prev.items.map((i: any) =>
-            i.id === id ? { ...i, status: newStatus } : i
-          ),
-        }));
-      } else {
-        alert("❌ Failed to update status");
+      // 1️⃣ Check if claim already exists
+      const { data: existingClaims, error: checkError } = await supabase
+        .from("claims")
+        .select("id")
+        .eq("item_id", itemId);
+
+      if (checkError) {
+        console.warn("Claim check error:", checkError);
+        return;
       }
-    } catch {
-      alert("Error updating status");
+
+      if (existingClaims && existingClaims.length > 0) {
+        console.log("Claim already exists for item:", itemId);
+        return;
+      }
+
+      // 2️⃣ Get admin user ID (so claimed_by has a valid reference)
+      const { data: adminUser } = await supabase.auth.getUser();
+      const adminId = adminUser?.user?.id || null;
+
+      // 3️⃣ Insert new claim
+      const { error: insertError } = await supabase.from("claims").insert([
+        {
+          item_id: itemId,
+          message: "Automatically created by admin marking this item as claimed.",
+          status: "Approved",
+          claimed_by: adminId,
+        },
+      ]);
+
+      if (insertError) {
+        console.error("Error creating claim:", insertError);
+      } else {
+        console.log("✅ Auto claim created for item:", itemId);
+      }
+    } catch (err) {
+      console.error("Auto claim creation failed:", err);
     }
-  };
+  }
 
-  if (loading) return <div className="p-6 text-center">Loading dashboard...</div>;
-  if (error) return <div className="text-red-500 text-center">{error}</div>;
+  // 🗑️ Handle Delete
+  async function handleDelete() {
+    if (!selectedItem) return;
+    if (!confirm("Are you sure you want to delete this report?")) return;
 
-  const { items = [] } = data;
+    setActionLoading(true);
+    const { error } = await supabase
+      .from("items")
+      .delete()
+      .eq("id", selectedItem.id);
+
+    if (error) alert("Error deleting item: " + error.message);
+    else {
+      alert("Item deleted successfully!");
+      setSelectedItem(null);
+      fetchItems();
+    }
+    setActionLoading(false);
+  }
+
+  // ⌨️ Close modal with Escape key
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setSelectedItem(null);
+      }
+    };
+    window.addEventListener("keydown", handleEsc);
+    return () => window.removeEventListener("keydown", handleEsc);
+  }, []);
 
   return (
-    <div className="relative max-w-7xl mx-auto p-6">
-      {/* Header */}
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-3xl font-bold text-ubBlue dark:text-ubGold">
-          Admin Dashboard
-        </h1>
-        <span className="bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200 px-4 py-2 rounded-full text-sm font-medium flex items-center gap-2 shadow-sm">
-          ⭐ Admin Mode Active
-        </span>
+    <div className="p-6 max-w-7xl mx-auto">
+      <h1 className="text-3xl font-bold text-ubGold mb-6">
+        Admin Dashboard
+      </h1>
+
+      {/* 🧭 Tabs */}
+      <div className="flex gap-3 mb-8">
+        <button
+          onClick={() => setTab("items")}
+          className={`px-4 py-2 rounded-md font-semibold transition ${
+            tab === "items"
+              ? "bg-blue-600 text-white"
+              : "bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200"
+          }`}
+        >
+          📦 Reported Items
+        </button>
+        <button
+          onClick={() => setTab("claims")}
+          className={`px-4 py-2 rounded-md font-semibold transition ${
+            tab === "claims"
+              ? "bg-blue-600 text-white"
+              : "bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200"
+          }`}
+        >
+          🧾 Claims Management
+        </button>
       </div>
 
-      {/* Items Table */}
-      <section className="mb-10">
-        <h2 className="text-2xl font-semibold mb-3">
-          📦 Reported Items ({items.length})
-        </h2>
+      {/* 🧱 Tab Content */}
+      {tab === "items" ? (
+        <section>
+          <h2 className="text-2xl font-semibold mb-4 text-gray-800 dark:text-gray-100">
+            Reported Items ({items.length})
+          </h2>
 
-        <div className="overflow-x-auto bg-white dark:bg-gray-800 rounded-xl shadow border border-gray-200 dark:border-gray-700">
-          <table className="w-full border-collapse">
-            <thead className="bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100">
-              <tr>
-                <th className="p-3 text-left">Name</th>
-                <th className="p-3 text-left">Status</th>
-                <th className="p-3 text-left">Campus</th>
-                <th className="p-3 text-left">Reporter</th>
-                <th className="p-3 text-left">Reported At</th>
-                <th className="p-3 text-left">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((item: any) => (
-                <tr
-                  key={item.id}
-                  onClick={() => setSelectedItem(item)}
-                  className="border-t dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-900 cursor-pointer transition"
-                >
-                  <td className="p-3">{item.name}</td>
-
-                  {/* Status Dropdown */}
-                  <td className="p-3">
-                    <select
-                      value={item.status}
-                      onChange={(e) =>
-                        handleStatusChange(item.id, e.target.value)
-                      }
-                      className="bg-transparent border border-gray-300 dark:border-gray-600 rounded px-2 py-1 text-sm focus:ring-2 focus:ring-blue-400"
-                      onClick={(e) => e.stopPropagation()}
+          {loadingItems ? (
+            <p className="text-gray-500">Loading reported items...</p>
+          ) : items.length === 0 ? (
+            <p className="text-gray-400">No reported items found.</p>
+          ) : (
+            <div className="overflow-x-auto bg-white dark:bg-gray-800 rounded-lg shadow-md">
+              <table className="w-full text-sm text-left">
+                <thead className="bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200">
+                  <tr>
+                    <th className="px-4 py-3">Name</th>
+                    <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3">Campus</th>
+                    <th className="px-4 py-3">Reporter</th>
+                    <th className="px-4 py-3">Reported At</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((item) => (
+                    <tr
+                      key={item.id}
+                      onClick={() => setSelectedItem(item)}
+                      className="cursor-pointer border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 transition"
                     >
-                      <option value="Lost">Lost</option>
-                      <option value="Found">Found</option>
-                      <option value="Claimed">Claimed</option>
-                    </select>
-                  </td>
-
-                  <td className="p-3">{item.campus}</td>
-                  <td className="p-3">
-                    {item.reporter_name || item.reporter_email}
-                  </td>
-                  <td className="p-3">
-                    {new Date(item.reported_at).toLocaleDateString()}
-                  </td>
-
-                  <td className="p-3">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDelete(item.id);
-                      }}
-                      className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded"
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      {/* 🧾 Report Details Card */}
-      {selectedItem && (
-        <div className="fixed inset-0 flex items-center justify-center z-[2100]">
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setSelectedItem(null)} />
-          <div className="relative bg-white dark:bg-gray-800 rounded-2xl p-6 w-[90%] max-w-md shadow-2xl z-[2200]">
-            <h3 className="text-xl font-semibold border-b border-gray-200 dark:border-gray-700 pb-2 mb-3">
-              🧾 Report Details
-            </h3>
-            <div className="space-y-2 text-sm sm:text-base">
-              <p><strong>Item Name:</strong> {selectedItem.name}</p>
-              <p><strong>Status:</strong> {selectedItem.status}</p>
-              <p><strong>Category:</strong> {selectedItem.category || "N/A"}</p>
-              <p><strong>Campus:</strong> {selectedItem.campus}</p>
-              <p><strong>Location:</strong> {selectedItem.location || "N/A"}</p>
-              <p><strong>Reporter Name:</strong> {selectedItem.reporter_name || "N/A"}</p>
-              <p><strong>Reporter Email:</strong> {selectedItem.reporter_email || "N/A"}</p>
-              <p><strong>Description:</strong> {selectedItem.description || "No description"}</p>
-              <p><strong>Reported On:</strong> {new Date(selectedItem.reported_at).toLocaleString()}</p>
+                      <td className="px-4 py-3 font-medium">{item.name}</td>
+                      <td className="px-4 py-3">{item.status}</td>
+                      <td className="px-4 py-3">{item.campus}</td>
+                      <td className="px-4 py-3">
+                        {item.reporter_name || "N/A"}
+                      </td>
+                      <td className="px-4 py-3">
+                        {item.reported_at ? formatDate(item.reported_at) : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
+          )}
+        </section>
+      ) : (
+        <section>
+          <h2 className="text-2xl font-semibold mb-4 text-gray-800 dark:text-gray-100">
+            Claims Management ({claims.length})
+          </h2>
+
+          {loadingClaims ? (
+            <p className="text-gray-500">Loading claims...</p>
+          ) : claims.length === 0 ? (
+            <p className="text-gray-400">No claims found yet.</p>
+          ) : (
+            <div className="overflow-x-auto bg-white dark:bg-gray-800 rounded-lg shadow-md">
+              <table className="w-full text-sm text-left">
+                <thead className="bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200">
+                  <tr>
+                    <th className="px-4 py-3">Item</th>
+                    <th className="px-4 py-3">Campus</th>
+                    <th className="px-4 py-3">Claimed By</th>
+                    <th className="px-4 py-3">Message</th>
+                    <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3">Created</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {claims.map((claim) => (
+                    <tr
+                      key={claim.id}
+                      className="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700"
+                    >
+                      <td className="px-4 py-3 font-medium">
+                        {claim.items?.name || "N/A"}
+                      </td>
+                      <td className="px-4 py-3">{claim.items?.campus || "—"}</td>
+                      <td className="px-4 py-3">
+                        {claim.claimed_by?.email || "Unknown"}
+                      </td>
+                      <td className="px-4 py-3">{claim.message || "—"}</td>
+                      <td className="px-4 py-3 font-semibold">{claim.status}</td>
+                      <td className="px-4 py-3">{formatDate(claim.created_at)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* 🪟 Report Detail Modal */}
+      {selectedItem && (
+        <div
+          className="fixed inset-0 flex items-center justify-center bg-black/60 z-50"
+          onClick={() => setSelectedItem(null)}
+        >
+          <div
+            className="bg-white dark:bg-gray-900 rounded-xl shadow-lg p-6 w-full max-w-lg relative"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* ✖ Close button */}
             <button
               onClick={() => setSelectedItem(null)}
-              className="w-full mt-4 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg"
+              className="absolute top-2 right-3 text-gray-500 hover:text-gray-800 dark:hover:text-gray-300 text-lg"
             >
-              Close
+              ✕
             </button>
+
+            <h3 className="text-2xl font-bold mb-4 text-gray-800 dark:text-gray-100">
+              Report Details
+            </h3>
+
+            <div className="space-y-2 text-gray-700 dark:text-gray-300">
+              <p><strong>Item Name:</strong> {selectedItem.name}</p>
+              <p><strong>Status:</strong> {selectedItem.status}</p>
+              <p><strong>Category:</strong> {selectedItem.category || "—"}</p>
+              <p><strong>Campus:</strong> {selectedItem.campus}</p>
+              <p><strong>Location:</strong> {selectedItem.location || "—"}</p>
+              <p><strong>Reporter Name:</strong> {selectedItem.reporter_name || "—"}</p>
+              <p><strong>Reporter Email:</strong> {selectedItem.reporter_email || "—"}</p>
+              <p><strong>Description:</strong> {selectedItem.description || "—"}</p>
+              <p>
+                <strong>Reported On:</strong>{" "}
+                {selectedItem.reported_at
+                  ? new Date(selectedItem.reported_at).toLocaleString("en-BZ")
+                  : "—"}
+              </p>
+            </div>
+
+            {/* 🧭 Action Buttons */}
+            <div className="mt-6 flex flex-wrap gap-3 justify-between">
+              <button
+                onClick={() => handleUpdateStatus("Claimed")}
+                disabled={actionLoading}
+                className="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 transition disabled:opacity-50"
+              >
+                Mark as Claimed
+              </button>
+
+              <button
+                onClick={() => handleUpdateStatus("Found")}
+                disabled={actionLoading}
+                className="bg-yellow-500 text-white px-4 py-2 rounded-md hover:bg-yellow-600 transition disabled:opacity-50"
+              >
+                Mark as Found
+              </button>
+
+              <button
+                onClick={handleDelete}
+                disabled={actionLoading}
+                className="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700 transition disabled:opacity-50"
+              >
+                Delete
+              </button>
+            </div>
+
+            {/* 🟦 Bottom Close Button */}
+            <div className="mt-6 text-right">
+              <button
+                onClick={() => setSelectedItem(null)}
+                className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

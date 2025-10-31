@@ -4,23 +4,15 @@ import type { NextRequest } from "next/server";
 
 export async function middleware(req: NextRequest) {
   const res = NextResponse.next();
-
-  // ✅ Create a Supabase client tied to cookies
   const supabase = createMiddlewareClient({ req, res });
 
-  // ✅ Ensure session refreshes properly in production (Vercel)
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-
-  if (!session) {
-    console.warn("⚠️ No active Supabase session found.");
-  }
+  // 👇 Refresh and attach the Supabase session to every request
+  await supabase.auth.getSession();
 
   return res;
 }
 
-// ✅ Apply middleware to all app routes
+// ✅ Apply this middleware to all routes (including /api)
 export const config = {
   matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
 };

@@ -50,7 +50,6 @@ export default function Navbar() {
       const adminFlag = localStorage.getItem("isManualAdmin");
       setIsManualAdmin(!!adminFlag);
 
-      // ✅ Safety cleanup: if logged-in user exists, clear old admin flag
       supabase.auth.getUser().then(({ data: { user } }) => {
         if (user && adminFlag) {
           localStorage.removeItem("isManualAdmin");
@@ -66,17 +65,14 @@ export default function Navbar() {
 
   const handleLogout = async () => {
     try {
-      // ✅ Always clear manual admin flag first
       localStorage.removeItem("isManualAdmin");
       setIsManualAdmin(false);
-
       await supabase.auth.signOut();
 
-      // ✅ Small confirmation toast
       setToast("✅ You’ve been logged out");
       setTimeout(() => {
         setToast("");
-        window.location.href = "/login"; // full redirect for clean session
+        window.location.href = "/login";
       }, 1200);
     } catch (err) {
       console.error("Logout error:", err);
@@ -113,16 +109,21 @@ export default function Navbar() {
         {/* 🌐 Desktop Nav */}
         <nav className="hidden md:flex gap-6 font-medium items-center relative">
           <NavLink href="/">Home</NavLink>
-          <NavLink href="/items">Items</NavLink>
 
           {/* 👤 Regular Users */}
-          {user && !isAdmin && <NavLink href="/report">Report</NavLink>}
+          {user && !isAdmin && (
+            <>
+              <NavLink href="/items">Items</NavLink>
+              <NavLink href="/report">Report</NavLink>
+            </>
+          )}
 
           {/* 🧑‍💼 Admin Users */}
           {isAdmin && (
             <>
               <NavLink href="/reports">Reports</NavLink>
               <NavLink href="/admin">Admin</NavLink>
+              <NavLink href="/admin/claims">Claims</NavLink>
             </>
           )}
 
@@ -194,16 +195,20 @@ export default function Navbar() {
                 <NavLink href="/" onClick={() => setMenuOpen(false)}>
                   Home
                 </NavLink>
-                <NavLink href="/items" onClick={() => setMenuOpen(false)}>
-                  Items
-                </NavLink>
 
+                {/* 👤 Regular Users */}
                 {!isAdmin && user && (
-                  <NavLink href="/report" onClick={() => setMenuOpen(false)}>
-                    Report
-                  </NavLink>
+                  <>
+                    <NavLink href="/items" onClick={() => setMenuOpen(false)}>
+                      Items
+                    </NavLink>
+                    <NavLink href="/report" onClick={() => setMenuOpen(false)}>
+                      Report
+                    </NavLink>
+                  </>
                 )}
 
+                {/* 🧑‍💼 Admin Users */}
                 {isAdmin && (
                   <>
                     <NavLink href="/reports" onClick={() => setMenuOpen(false)}>
@@ -211,6 +216,12 @@ export default function Navbar() {
                     </NavLink>
                     <NavLink href="/admin" onClick={() => setMenuOpen(false)}>
                       Admin
+                    </NavLink>
+                    <NavLink
+                      href="/admin/claims"
+                      onClick={() => setMenuOpen(false)}
+                    >
+                      Claims
                     </NavLink>
                   </>
                 )}
