@@ -18,14 +18,13 @@ export default function AdminDashboard() {
     async function fetchAdmin() {
       const { data, error } = await supabase.auth.getUser();
       if (!error && data?.user) {
-        // ✅ null-safe assignment
         setAdminEmail(data.user.email ?? null);
       }
     }
     fetchAdmin();
   }, []);
 
-  // 🧩 Fetch Items
+  // 🧩 Fetch Items directly from Supabase
   useEffect(() => {
     fetchItems();
   }, []);
@@ -40,26 +39,22 @@ export default function AdminDashboard() {
     setLoadingItems(false);
   }
 
-  // 🧾 Fetch Claims
+  // 🧾 Fetch Claims via API route
   useEffect(() => {
     async function fetchClaims() {
-      const { data, error } = await supabase
-        .from("claims")
-        .select(
-          `
-          id,
-          item_id,
-          message,
-          status,
-          created_at,
-          claimed_by ( email ),
-          items ( name, campus, status )
-        `
-        )
-        .order("created_at", { ascending: false });
-      if (!error) setClaims(data || []);
-      setLoadingClaims(false);
+      try {
+        const res = await fetch("/api/claims");
+        if (!res.ok) throw new Error("Failed to fetch claims");
+
+        const data = await res.json();
+        setClaims(data || []);
+      } catch (err) {
+        console.error("❌ Fetch error:", err);
+      } finally {
+        setLoadingClaims(false);
+      }
     }
+
     fetchClaims();
   }, []);
 
@@ -101,7 +96,6 @@ export default function AdminDashboard() {
   // 🧠 Auto Claim creation
   async function handleAutoClaim(itemId: string) {
     try {
-      // 1️⃣ Check if claim already exists
       const { data: existingClaims, error: checkError } = await supabase
         .from("claims")
         .select("id")
@@ -117,11 +111,9 @@ export default function AdminDashboard() {
         return;
       }
 
-      // 2️⃣ Get admin user ID
       const { data: adminUser } = await supabase.auth.getUser();
       const adminId = adminUser?.user?.id || null;
 
-      // 3️⃣ Insert new claim
       const { error: insertError } = await supabase.from("claims").insert([
         {
           item_id: itemId,
@@ -164,9 +156,7 @@ export default function AdminDashboard() {
   // ⌨️ Close modal with Escape key
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setSelectedItem(null);
-      }
+      if (e.key === "Escape") setSelectedItem(null);
     };
     window.addEventListener("keydown", handleEsc);
     return () => window.removeEventListener("keydown", handleEsc);
@@ -174,9 +164,7 @@ export default function AdminDashboard() {
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
-      <h1 className="text-3xl font-bold text-ubGold mb-6">
-        Admin Dashboard
-      </h1>
+      <h1 className="text-3xl font-bold text-ubGold mb-6">Admin Dashboard</h1>
 
       {/* 🧭 Tabs */}
       <div className="flex gap-3 mb-8">
@@ -235,9 +223,7 @@ export default function AdminDashboard() {
                       <td className="px-4 py-3 font-medium">{item.name}</td>
                       <td className="px-4 py-3">{item.status}</td>
                       <td className="px-4 py-3">{item.campus}</td>
-                      <td className="px-4 py-3">
-                        {item.reporter_name || "N/A"}
-                      </td>
+                      <td className="px-4 py-3">{item.reporter_name || "N/A"}</td>
                       <td className="px-4 py-3">
                         {item.reported_at ? formatDate(item.reported_at) : "—"}
                       </td>
@@ -286,7 +272,9 @@ export default function AdminDashboard() {
                       </td>
                       <td className="px-4 py-3">{claim.message || "—"}</td>
                       <td className="px-4 py-3 font-semibold">{claim.status}</td>
-                      <td className="px-4 py-3">{formatDate(claim.created_at)}</td>
+                      <td className="px-4 py-3">
+                        {formatDate(claim.created_at)}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -319,14 +307,33 @@ export default function AdminDashboard() {
             </h3>
 
             <div className="space-y-2 text-gray-700 dark:text-gray-300">
-              <p><strong>Item Name:</strong> {selectedItem.name}</p>
-              <p><strong>Status:</strong> {selectedItem.status}</p>
-              <p><strong>Category:</strong> {selectedItem.category || "—"}</p>
-              <p><strong>Campus:</strong> {selectedItem.campus}</p>
-              <p><strong>Location:</strong> {selectedItem.location || "—"}</p>
-              <p><strong>Reporter Name:</strong> {selectedItem.reporter_name || "—"}</p>
-              <p><strong>Reporter Email:</strong> {selectedItem.reporter_email || "—"}</p>
-              <p><strong>Description:</strong> {selectedItem.description || "—"}</p>
+              <p>
+                <strong>Item Name:</strong> {selectedItem.name}
+              </p>
+              <p>
+                <strong>Status:</strong> {selectedItem.status}
+              </p>
+              <p>
+                <strong>Category:</strong> {selectedItem.category || "—"}
+              </p>
+              <p>
+                <strong>Campus:</strong> {selectedItem.campus}
+              </p>
+              <p>
+                <strong>Location:</strong> {selectedItem.location || "—"}
+              </p>
+              <p>
+                <strong>Reporter Name:</strong>{" "}
+                {selectedItem.reporter_name || "—"}
+              </p>
+              <p>
+                <strong>Reporter Email:</strong>{" "}
+                {selectedItem.reporter_email || "—"}
+              </p>
+              <p>
+                <strong>Description:</strong>{" "}
+                {selectedItem.description || "—"}
+              </p>
               <p>
                 <strong>Reported On:</strong>{" "}
                 {selectedItem.reported_at
