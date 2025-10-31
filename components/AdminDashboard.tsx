@@ -18,7 +18,8 @@ export default function AdminDashboard() {
     async function fetchAdmin() {
       const { data, error } = await supabase.auth.getUser();
       if (!error && data?.user) {
-        setAdminEmail(data.user.email);
+        // ✅ null-safe assignment
+        setAdminEmail(data.user.email ?? null);
       }
     }
     fetchAdmin();
@@ -116,7 +117,7 @@ export default function AdminDashboard() {
         return;
       }
 
-      // 2️⃣ Get admin user ID (so claimed_by has a valid reference)
+      // 2️⃣ Get admin user ID
       const { data: adminUser } = await supabase.auth.getUser();
       const adminId = adminUser?.user?.id || null;
 
