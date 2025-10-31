@@ -6,13 +6,12 @@ export async function middleware(req: NextRequest) {
   const res = NextResponse.next();
   const supabase = createMiddlewareClient({ req, res });
 
-  // 👇 Refresh and attach the Supabase session to every request
+  // Attach the user's session to every request (this includes API routes)
   await supabase.auth.getSession();
 
   return res;
 }
 
-// ✅ Apply this middleware to all routes (including /api)
 export const config = {
   matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
 };
