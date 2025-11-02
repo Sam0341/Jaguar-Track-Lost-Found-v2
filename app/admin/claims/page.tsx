@@ -10,7 +10,6 @@ type ClaimRaw = {
   message?: string | null;
   status?: string | null;
   created_at?: string | null;
-  // other fields if present...
 };
 
 type ClaimView = ClaimRaw & {
@@ -23,24 +22,24 @@ export default function AdminClaimsPage() {
   const [claims, setClaims] = useState<ClaimView[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [actionLoading, setActionLoading] = useState<string | null>(null); // claim id currently loading
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
 
-  // helper to decide if we should send dev-bypass header (localhost)
   const shouldSendDevHeader = () =>
     typeof window !== "undefined" && window.location.hostname.includes("localhost");
 
   useEffect(() => {
     fetchAndHydrateClaims();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ✅ Fetch claims and hydrate them with item + profile data
   async function fetchAndHydrateClaims() {
     setLoading(true);
     setErrorMsg(null);
 
     try {
-      // 1) fetch raw claims from API
       const res = await fetch("/api/claims", {
+        method: "GET",
+        credentials: "include", // ✅ include session cookies
         headers: shouldSendDevHeader() ? { "x-dev-admin": "true" } : undefined,
       });
 
@@ -50,7 +49,6 @@ export default function AdminClaimsPage() {
       }
 
       const rawData = await res.json();
-      // API returns array (we fall back to simple rows server-side). Accept either data or {claims: []}
       const rawClaims: ClaimRaw[] =
         Array.isArray(rawData) ? rawData : rawData?.claims || rawData?.data || [];
 
@@ -60,13 +58,12 @@ export default function AdminClaimsPage() {
         return;
       }
 
-      // 2) hydrate each claim with item and claimant profile (parallel)
+      // 🧩 Hydrate claims with item + claimant info
       const hydrated = await Promise.all(
         rawClaims.map(async (c) => {
           const view: ClaimView = { ...c, itemName: null, itemCampus: null, claimantEmail: null };
 
           try {
-            // fetch item name/campus (if item exists)
             if (c.item_id) {
               const { data: itemData, error: itemErr } = await supabase
                 .from("items")
@@ -80,7 +77,6 @@ export default function AdminClaimsPage() {
               }
             }
 
-            // fetch profile email from profiles table using claimed_by (if present)
             if (c.claimed_by) {
               const { data: profileData, error: profileErr } = await supabase
                 .from("profiles")
@@ -90,13 +86,9 @@ export default function AdminClaimsPage() {
 
               if (!profileErr && profileData) {
                 view.claimantEmail = profileData.email ?? null;
-              } else {
-                // fallback: try the auth.users table through supabase.rpc? (not always available client-side)
-                view.claimantEmail = null;
               }
             }
           } catch (err) {
-            // don't fail whole list if one lookup fails
             console.warn("Hydration warning for claim", c.id, err);
           }
 
@@ -113,6 +105,7 @@ export default function AdminClaimsPage() {
     }
   }
 
+  // ✅ Update claim status (approve/reject)
   async function updateClaimStatus(claimId: string, status: "approved" | "rejected") {
     setActionLoading(claimId);
     setErrorMsg(null);
@@ -120,6 +113,7 @@ export default function AdminClaimsPage() {
     try {
       const res = await fetch("/api/claims", {
         method: "PATCH",
+        credentials: "include", // ✅ include cookie again here too
         headers: {
           "Content-Type": "application/json",
           ...(shouldSendDevHeader() ? { "x-dev-admin": "true" } : {}),
@@ -135,7 +129,6 @@ export default function AdminClaimsPage() {
       const json = await res.json();
       console.log("PATCH result:", json);
 
-      // update local state (optimistic)
       setClaims((prev) =>
         prev.map((c) => (c.id === claimId ? { ...c, status: status } : c))
       );
@@ -147,6 +140,7 @@ export default function AdminClaimsPage() {
     }
   }
 
+  // 🧭 UI RENDER
   if (loading) {
     return <div className="text-center py-16 text-gray-400">Loading claims...</div>;
   }
@@ -206,7 +200,9 @@ export default function AdminClaimsPage() {
                     {c.status ? c.status.charAt(0).toUpperCase() + c.status.slice(1) : "Pending"}
                   </span>
                 </td>
-                <td className="px-4 py-3">{c.created_at ? new Date(c.created_at).toLocaleString() : "—"}</td>
+                <td className="px-4 py-3">
+                  {c.created_at ? new Date(c.created_at).toLocaleString() : "—"}
+                </td>
                 <td className="px-4 py-3 space-x-2">
                   <button
                     onClick={() => updateClaimStatus(c.id, "approved")}
