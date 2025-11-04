@@ -25,6 +25,7 @@ type ClaimView = ClaimRaw & {
 export default function AdminClaimsPage() {
   const [claims, setClaims] = useState<ClaimView[]>([]);
   const [selectedClaim, setSelectedClaim] = useState<ClaimView | null>(null);
+  const [zoomImage, setZoomImage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -36,7 +37,7 @@ export default function AdminClaimsPage() {
     fetchAndHydrateClaims();
   }, []);
 
-  // 🧠 Fetch all claims and hydrate with item + claimant info
+  // 🧠 Fetch all claims and hydrate
   async function fetchAndHydrateClaims() {
     setLoading(true);
     setErrorMsg(null);
@@ -55,7 +56,6 @@ export default function AdminClaimsPage() {
       });
 
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-
       const rawData = await res.json();
       const rawClaims: ClaimRaw[] =
         Array.isArray(rawData) ? rawData : rawData?.claims || rawData?.data || [];
@@ -64,7 +64,7 @@ export default function AdminClaimsPage() {
         rawClaims.map(async (c) => {
           const view: ClaimView = { ...c };
 
-          // 📦 Fetch item info
+          // 📦 Item details
           if (c.item_id) {
             const { data: item, error: itemErr } = await supabase
               .from("items")
@@ -80,7 +80,7 @@ export default function AdminClaimsPage() {
             }
           }
 
-          // 👤 Fetch claimant info
+          // 👤 Claimant details
           if (c.claimed_by) {
             const { data: profile, error: profileErr } = await supabase
               .from("profiles")
@@ -129,7 +129,7 @@ export default function AdminClaimsPage() {
 
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
 
-      // ✅ Update instantly in UI
+      // Update UI
       setClaims((prev) =>
         prev.map((c) => (c.id === claimId ? { ...c, status } : c))
       );
@@ -143,7 +143,20 @@ export default function AdminClaimsPage() {
     }
   }
 
+  // 💨 ESC to close modals
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setSelectedClaim(null);
+        setZoomImage(null);
+      }
+    };
+    window.addEventListener("keydown", handleEsc);
+    return () => window.removeEventListener("keydown", handleEsc);
+  }, []);
+
   if (loading) return <div className="text-center py-16 text-gray-400">Loading claims...</div>;
+
   if (errorMsg)
     return (
       <div className="text-center py-16 text-red-400">
@@ -242,7 +255,7 @@ export default function AdminClaimsPage() {
         </table>
       </div>
 
-      {/* 🪟 Modal for claim details */}
+      {/* 🪟 Claim Details Modal */}
       {selectedClaim && (
         <div
           onClick={() => setSelectedClaim(null)}
@@ -267,7 +280,8 @@ export default function AdminClaimsPage() {
               <img
                 src={selectedClaim.itemImage}
                 alt="Item Image"
-                className="w-full h-48 object-cover rounded-lg mb-4"
+                onClick={() => setZoomImage(selectedClaim.itemImage!)}
+                className="w-full h-48 object-cover rounded-lg mb-4 cursor-zoom-in hover:opacity-90 transition"
               />
             )}
 
@@ -281,6 +295,7 @@ export default function AdminClaimsPage() {
               <p>
                 <strong>Description:</strong> {selectedClaim.itemDesc ?? "—"}
               </p>
+              <hr className="my-2 border-gray-600" />
               <p>
                 <strong>Claimant:</strong>{" "}
                 {selectedClaim.claimantName ?? "—"}
@@ -309,6 +324,20 @@ export default function AdminClaimsPage() {
               </p>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* 🔍 Image Lightbox */}
+      {zoomImage && (
+        <div
+          onClick={() => setZoomImage(null)}
+          className="fixed inset-0 bg-black/90 z-[9999] flex justify-center items-center"
+        >
+          <img
+            src={zoomImage}
+            alt="Zoomed Item"
+            className="max-h-[90vh] max-w-[90vw] object-contain rounded-lg shadow-lg cursor-zoom-out"
+          />
         </div>
       )}
     </div>

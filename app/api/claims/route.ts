@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
+import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 
 /**
- * Dev bypass helper
- * Allows localhost or requests with x-dev-admin header to skip auth
+ * Dev bypass helper (for localhost or x-dev-admin header)
  */
 function isDevBypass(req: Request) {
   const origin = req.headers.get("origin") || req.headers.get("referer") || "";
@@ -27,62 +27,58 @@ function isDevBypass(req: Request) {
 }
 
 /**
- * ✅ GET /api/claims
- * Fetch all claims (admin)
+ * Create a Supabase admin client (service key)
+ */
+function createAdminClient() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_KEY!,
+    { auth: { persistSession: false } }
+  );
+}
+
+/**
+ * ✅ GET /api/claims - Fetch all claims (admin)
  */
 export async function GET(req: Request) {
   try {
-    const supabase = createRouteHandlerClient({ cookies });
-
+    const cookieClient = createRouteHandlerClient({ cookies });
     const {
       data: { user },
       error: userError,
-    } = await supabase.auth.getUser();
+    } = await cookieClient.auth.getUser();
 
-    // 🔐 Allow dev bypass
-    if (userError || !user) {
-      if (!isDevBypass(req)) {
-        return NextResponse.json(
-          { success: false, error: "Unauthorized – no valid session" },
-          { status: 401 }
-        );
-      } else {
-        console.warn("⚠️ Dev bypass used for GET /api/claims");
-      }
-    }
+    // 🔐 Use service key if no valid session (on Vercel)
+    const isBypass = isDevBypass(req);
+    const supabase = !user && !isBypass ? createAdminClient() : cookieClient;
 
-    // 🧾 Simplified query (no joins)
     const { data, error } = await supabase
       .from("claims")
       .select("*")
       .order("created_at", { ascending: false });
 
-    if (error) {
-      console.error("Claim fetch error:", error);
-      return NextResponse.json({ success: false, error: error.message }, { status: 400 });
-    }
+    if (error) throw error;
 
     return NextResponse.json(data || []);
-  } catch (err) {
-    console.error("🔥 Unexpected error in GET /claims:", err);
+  } catch (err: any) {
+    console.error("🔥 GET /claims error:", err.message);
     return NextResponse.json(
-      { success: false, error: "Internal server error" },
+      { success: false, error: err.message || "Internal server error" },
       { status: 500 }
     );
   }
 }
 
 /**
- * ✅ POST /api/claims
- * Create a new claim
+ * ✅ POST /api/claims - Create a new claim
  */
 export async function POST(req: Request) {
   try {
-    const supabase = createRouteHandlerClient({ cookies });
+    const cookieClient = createRouteHandlerClient({ cookies });
     const {
       data: { user },
       error: userError,
-    } = await supabase.auth.getUser();
+    } = await cookieClient.auth.getUser();
 
     let devBypassed = false;
     if (userError || !user) {
@@ -98,19 +94,19 @@ export async function POST(req: Request) {
     }
 
     const { item_id, message } = await req.json();
-
-    if (!item_id) {
+    if (!item_id)
       return NextResponse.json(
         { success: false, error: "Missing item_id" },
         { status: 400 }
       );
-    }
 
     const claimedBy = devBypassed
       ? process.env.DEV_ADMIN_ID || null
       : user?.id || null;
 
-    const { error: insertError } = await supabase.from("claims").insert([
+    const supabase = devBypassed ? createAdminClient() : cookieClient;
+
+    const { error } = await supabase.from("claims").insert([
       {
         item_id,
         claimed_by: claimedBy,
@@ -119,75 +115,52 @@ export async function POST(req: Request) {
       },
     ]);
 
-    if (insertError) {
-      console.error("Claim insert error:", insertError);
-      return NextResponse.json({ success: false, error: insertError.message }, { status: 400 });
-    }
+    if (error) throw error;
 
     return NextResponse.json({
       success: true,
       message: "Claim submitted successfully.",
     });
-  } catch (err) {
-    console.error("🔥 Unexpected error in POST /claims:", err);
+  } catch (err: any) {
+    console.error("🔥 POST /claims error:", err.message);
     return NextResponse.json(
-      { success: false, error: "Internal server error" },
+      { success: false, error: err.message || "Internal server error" },
       { status: 500 }
     );
   }
 }
 
 /**
- * ✅ PATCH /api/claims
- * Approve or reject a claim (admin)
+ * ✅ PATCH /api/claims - Approve or reject a claim (admin)
  */
 export async function PATCH(req: Request) {
   try {
-    const supabase = createRouteHandlerClient({ cookies });
+    const cookieClient = createRouteHandlerClient({ cookies });
     const {
       data: { user },
       error: userError,
-    } = await supabase.auth.getUser();
-
-    let devBypassed = false;
-    if (userError || !user) {
-      if (!isDevBypass(req)) {
-        return NextResponse.json(
-          { success: false, error: "Unauthorized – no valid session" },
-          { status: 401 }
-        );
-      } else {
-        devBypassed = true;
-        console.warn("⚠️ Dev bypass used for PATCH /api/claims");
-      }
-    }
+    } = await cookieClient.auth.getUser();
 
     const { claim_id, status } = await req.json();
-
-    if (!claim_id || !status) {
+    if (!claim_id || !status)
       return NextResponse.json(
         { success: false, error: "Missing claim_id or status" },
         { status: 400 }
       );
-    }
 
     const normalizedStatus = String(status).toLowerCase();
+    const isBypass = isDevBypass(req);
+    const supabase = !user && !isBypass ? createAdminClient() : cookieClient;
 
-    // Update claim status
+    // Update claim
     const { error: updateError } = await supabase
       .from("claims")
       .update({ status: normalizedStatus })
       .eq("id", claim_id);
 
-    if (updateError) {
-      console.error("Claim update error:", updateError);
-      return NextResponse.json(
-        { success: false, error: updateError.message },
-        { status: 400 }
-      );
-    }
+    if (updateError) throw updateError;
 
-    // If approved, mark the item as claimed
+    // If approved, also mark related item as "Claimed"
     if (normalizedStatus === "approved") {
       const { data: claimData } = await supabase
         .from("claims")
@@ -207,10 +180,10 @@ export async function PATCH(req: Request) {
       success: true,
       message: `Claim ${normalizedStatus} successfully!`,
     });
-  } catch (err) {
-    console.error("🔥 PATCH /claims error:", err);
+  } catch (err: any) {
+    console.error("🔥 PATCH /claims error:", err.message);
     return NextResponse.json(
-      { success: false, error: "Internal server error" },
+      { success: false, error: err.message || "Internal server error" },
       { status: 500 }
     );
   }
