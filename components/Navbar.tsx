@@ -44,44 +44,70 @@ export default function Navbar() {
   const [isManualAdmin, setIsManualAdmin] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const [toast, setToast] = useState("");
+  const [role, setRole] = useState<string | null>(null);
 
+  // 🧠 Determine role from Supabase profiles
+  useEffect(() => {
+    async function fetchUserRole() {
+      const { data: authData } = await supabase.auth.getUser();
+      const authUser = authData?.user;
+
+      if (authUser?.email) {
+        // Try to load role from profiles
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("email", authUser.email)
+          .single();
+
+        if (profile?.role) {
+          setRole(profile.role);
+          localStorage.setItem("userRole", profile.role);
+        }
+      } else {
+        // Check localStorage fallback (manual admin login)
+        const storedRole = localStorage.getItem("userRole");
+        const adminFlag = localStorage.getItem("isManualAdmin");
+        if (storedRole) setRole(storedRole);
+        if (adminFlag) setIsManualAdmin(true);
+      }
+    }
+
+    fetchUserRole();
+  }, []);
+
+  // 🪟 Detect scrolling for shadow effect
   useEffect(() => {
     if (typeof window !== "undefined") {
-      const adminFlag = localStorage.getItem("isManualAdmin");
-      setIsManualAdmin(!!adminFlag);
-
-      supabase.auth.getUser().then(({ data: { user } }) => {
-        if (user && adminFlag) {
-          localStorage.removeItem("isManualAdmin");
-          setIsManualAdmin(false);
-        }
-      });
-
       const handleScroll = () => setScrolled(window.scrollY > 10);
       window.addEventListener("scroll", handleScroll);
       return () => window.removeEventListener("scroll", handleScroll);
     }
   }, []);
 
+  // 🚪 Logout
   const handleLogout = async () => {
     try {
       localStorage.removeItem("isManualAdmin");
+      localStorage.removeItem("userRole");
       setIsManualAdmin(false);
+      setRole(null);
       await supabase.auth.signOut();
 
       setToast("✅ You’ve been logged out");
       setTimeout(() => {
         setToast("");
-        window.location.href = "/login";
+        router.push("/login");
       }, 1200);
     } catch (err) {
       console.error("Logout error:", err);
     }
   };
 
-  const userRole = user?.user_metadata?.role;
-  const isAdmin = userRole === "admin" || isManualAdmin;
-  const userName = user?.email?.split("@")[0] || "User";
+  // 🧩 Determine user state
+  const userEmail = user?.email || "User";
+  const userName = userEmail.split("@")[0];
+  const isAdmin = role === "admin" || isManualAdmin;
 
   return (
     <header
@@ -106,7 +132,7 @@ export default function Navbar() {
           </span>
         </Link>
 
-        {/* 🌐 Desktop Nav */}
+        {/* 🌐 Desktop Navigation */}
         <nav className="hidden md:flex gap-6 font-medium items-center relative">
           <NavLink href="/">Home</NavLink>
 
@@ -127,10 +153,10 @@ export default function Navbar() {
             </>
           )}
 
-          {/* 🌙 Dark Mode */}
+          {/* 🌙 Theme Toggle */}
           <ThemeToggle />
 
-          {/* 👋 User Display + Logout */}
+          {/* 👋 User Info + Logout */}
           {!loading && (user || isAdmin) ? (
             <div className="flex items-center gap-3">
               <span className="text-sm text-gray-700 dark:text-gray-300">
@@ -196,7 +222,7 @@ export default function Navbar() {
                   Home
                 </NavLink>
 
-                {/* 👤 Regular Users */}
+                {/* Regular User Links */}
                 {!isAdmin && user && (
                   <>
                     <NavLink href="/items" onClick={() => setMenuOpen(false)}>
@@ -208,7 +234,7 @@ export default function Navbar() {
                   </>
                 )}
 
-                {/* 🧑‍💼 Admin Users */}
+                {/* Admin Links */}
                 {isAdmin && (
                   <>
                     <NavLink href="/reports" onClick={() => setMenuOpen(false)}>
@@ -254,7 +280,7 @@ export default function Navbar() {
         )}
       </AnimatePresence>
 
-      {/* 🔔 Logout Toast */}
+      {/* 🔔 Toast */}
       <AnimatePresence>
         {toast && (
           <motion.div

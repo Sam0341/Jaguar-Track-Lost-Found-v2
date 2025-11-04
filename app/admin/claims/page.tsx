@@ -15,11 +15,16 @@ type ClaimRaw = {
 type ClaimView = ClaimRaw & {
   itemName?: string | null;
   itemCampus?: string | null;
+  itemImage?: string | null;
+  itemDesc?: string | null;
   claimantEmail?: string | null;
+  claimantName?: string | null;
+  claimantPhone?: string | null;
 };
 
 export default function AdminClaimsPage() {
   const [claims, setClaims] = useState<ClaimView[]>([]);
+  const [selectedClaim, setSelectedClaim] = useState<ClaimView | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -31,65 +36,63 @@ export default function AdminClaimsPage() {
     fetchAndHydrateClaims();
   }, []);
 
-  // ✅ Fetch claims and hydrate them with item + profile data
+  // 🧠 Fetch all claims and hydrate with item + claimant info
   async function fetchAndHydrateClaims() {
     setLoading(true);
     setErrorMsg(null);
 
     try {
+      const session = (await supabase.auth.getSession()).data.session;
+      const token = session?.access_token;
+
       const res = await fetch("/api/claims", {
         method: "GET",
-        credentials: "include", // ✅ include session cookies
-        headers: shouldSendDevHeader() ? { "x-dev-admin": "true" } : undefined,
+        credentials: "include",
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(shouldSendDevHeader() ? { "x-dev-admin": "true" } : {}),
+        },
       });
 
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw new Error(`${res.status} ${res.statusText} ${text}`);
-      }
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
 
       const rawData = await res.json();
       const rawClaims: ClaimRaw[] =
         Array.isArray(rawData) ? rawData : rawData?.claims || rawData?.data || [];
 
-      if (!rawClaims || rawClaims.length === 0) {
-        setClaims([]);
-        setLoading(false);
-        return;
-      }
-
-      // 🧩 Hydrate claims with item + claimant info
       const hydrated = await Promise.all(
         rawClaims.map(async (c) => {
-          const view: ClaimView = { ...c, itemName: null, itemCampus: null, claimantEmail: null };
+          const view: ClaimView = { ...c };
 
-          try {
-            if (c.item_id) {
-              const { data: itemData, error: itemErr } = await supabase
-                .from("items")
-                .select("name, campus")
-                .eq("id", c.item_id)
-                .single();
+          // 📦 Fetch item info
+          if (c.item_id) {
+            const { data: item, error: itemErr } = await supabase
+              .from("items")
+              .select("name, campus, image_url, description")
+              .eq("id", c.item_id)
+              .single();
 
-              if (!itemErr && itemData) {
-                view.itemName = itemData.name ?? null;
-                view.itemCampus = itemData.campus ?? null;
-              }
+            if (!itemErr && item) {
+              view.itemName = item.name;
+              view.itemCampus = item.campus;
+              view.itemImage = item.image_url;
+              view.itemDesc = item.description;
             }
+          }
 
-            if (c.claimed_by) {
-              const { data: profileData, error: profileErr } = await supabase
-                .from("profiles")
-                .select("email")
-                .eq("id", c.claimed_by)
-                .single();
+          // 👤 Fetch claimant info
+          if (c.claimed_by) {
+            const { data: profile, error: profileErr } = await supabase
+              .from("profiles")
+              .select("full_name, email, phone")
+              .eq("id", c.claimed_by)
+              .single();
 
-              if (!profileErr && profileData) {
-                view.claimantEmail = profileData.email ?? null;
-              }
+            if (!profileErr && profile) {
+              view.claimantEmail = profile.email;
+              view.claimantName = profile.full_name;
+              view.claimantPhone = profile.phone;
             }
-          } catch (err) {
-            console.warn("Hydration warning for claim", c.id, err);
           }
 
           return view;
@@ -98,76 +101,68 @@ export default function AdminClaimsPage() {
 
       setClaims(hydrated);
     } catch (err: any) {
-      console.error("Fetch error:", err);
-      setErrorMsg(typeof err === "string" ? err : err.message || "Failed to fetch claims");
+      console.error("Fetch claims error:", err);
+      setErrorMsg(err.message || "Failed to fetch claims");
     } finally {
       setLoading(false);
     }
   }
 
-  // ✅ Update claim status (approve/reject)
+  // 🟢 Update claim status
   async function updateClaimStatus(claimId: string, status: "approved" | "rejected") {
     setActionLoading(claimId);
     setErrorMsg(null);
 
     try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+
       const res = await fetch("/api/claims", {
         method: "PATCH",
-        credentials: "include", // ✅ include cookie again here too
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
-          ...(shouldSendDevHeader() ? { "x-dev-admin": "true" } : {}),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({ claim_id: claimId, status }),
       });
 
-      if (!res.ok) {
-        const txt = await res.text().catch(() => "");
-        throw new Error(`${res.status} ${res.statusText} ${txt}`);
-      }
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
 
-      const json = await res.json();
-      console.log("PATCH result:", json);
-
+      // ✅ Update instantly in UI
       setClaims((prev) =>
-        prev.map((c) => (c.id === claimId ? { ...c, status: status } : c))
+        prev.map((c) => (c.id === claimId ? { ...c, status } : c))
       );
+      if (selectedClaim?.id === claimId)
+        setSelectedClaim({ ...selectedClaim, status });
     } catch (err: any) {
-      console.error("Update claim error:", err);
+      console.error("Update error:", err);
       setErrorMsg(err.message || "Failed to update claim");
     } finally {
       setActionLoading(null);
     }
   }
 
-  // 🧭 UI RENDER
-  if (loading) {
-    return <div className="text-center py-16 text-gray-400">Loading claims...</div>;
-  }
-
-  if (errorMsg) {
+  if (loading) return <div className="text-center py-16 text-gray-400">Loading claims...</div>;
+  if (errorMsg)
     return (
-      <div className="text-center py-16">
-        <p className="text-red-400 mb-4">Failed to fetch claims ({errorMsg})</p>
+      <div className="text-center py-16 text-red-400">
+        Failed to load claims: {errorMsg}
+        <br />
         <button
-          onClick={() => fetchAndHydrateClaims()}
-          className="px-4 py-2 rounded bg-blue-600 text-white"
+          onClick={fetchAndHydrateClaims}
+          className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-md"
         >
           Retry
         </button>
       </div>
     );
-  }
-
-  if (!claims || claims.length === 0) {
-    return <div className="text-center py-16 text-gray-400">No claims found.</div>;
-  }
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
       <h1 className="text-2xl font-bold mb-6">Claims Management</h1>
 
-      <div className="overflow-x-auto bg-white dark:bg-gray-800 rounded shadow">
+      <div className="overflow-x-auto bg-white dark:bg-gray-800 rounded-lg shadow">
         <table className="min-w-full text-sm">
           <thead className="bg-gray-100 dark:bg-gray-700 text-left">
             <tr>
@@ -182,10 +177,22 @@ export default function AdminClaimsPage() {
           </thead>
           <tbody>
             {claims.map((c) => (
-              <tr key={c.id} className="border-b dark:border-gray-700">
-                <td className="px-4 py-3 font-medium">{c.itemName ?? c.item_id}</td>
-                <td className="px-4 py-3 text-sm text-gray-600">{c.itemCampus ?? "—"}</td>
-                <td className="px-4 py-3 text-sm">{c.claimantEmail ?? c.claimed_by ?? "—"}</td>
+              <tr
+                key={c.id}
+                onClick={() => setSelectedClaim(c)}
+                className="border-b dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
+              >
+                <td className="px-4 py-3 font-semibold text-ubGold">
+                  {c.itemName ?? "—"}
+                </td>
+                <td className="px-4 py-3 text-sm text-gray-400">
+                  {c.itemCampus ?? "—"}
+                </td>
+                <td className="px-4 py-3 text-sm">
+                  {c.claimantName
+                    ? `${c.claimantName} (${c.claimantEmail})`
+                    : c.claimantEmail ?? "—"}
+                </td>
                 <td className="px-4 py-3 max-w-xs truncate">{c.message ?? "—"}</td>
                 <td className="px-4 py-3">
                   <span
@@ -197,22 +204,32 @@ export default function AdminClaimsPage() {
                         : "bg-yellow-500 text-white"
                     }`}
                   >
-                    {c.status ? c.status.charAt(0).toUpperCase() + c.status.slice(1) : "Pending"}
+                    {c.status
+                      ? c.status.charAt(0).toUpperCase() + c.status.slice(1)
+                      : "Pending"}
                   </span>
                 </td>
                 <td className="px-4 py-3">
-                  {c.created_at ? new Date(c.created_at).toLocaleString() : "—"}
+                  {c.created_at
+                    ? new Date(c.created_at).toLocaleString("en-BZ")
+                    : "—"}
                 </td>
                 <td className="px-4 py-3 space-x-2">
                   <button
-                    onClick={() => updateClaimStatus(c.id, "approved")}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      updateClaimStatus(c.id, "approved");
+                    }}
                     disabled={actionLoading !== null}
                     className="px-3 py-1 rounded bg-green-600 text-white disabled:opacity-50"
                   >
                     Approve
                   </button>
                   <button
-                    onClick={() => updateClaimStatus(c.id, "rejected")}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      updateClaimStatus(c.id, "rejected");
+                    }}
                     disabled={actionLoading !== null}
                     className="px-3 py-1 rounded bg-red-600 text-white disabled:opacity-50"
                   >
@@ -224,6 +241,76 @@ export default function AdminClaimsPage() {
           </tbody>
         </table>
       </div>
+
+      {/* 🪟 Modal for claim details */}
+      {selectedClaim && (
+        <div
+          onClick={() => setSelectedClaim(null)}
+          className="fixed inset-0 bg-black/60 z-50 flex justify-center items-center"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white dark:bg-gray-900 rounded-xl shadow-lg p-6 w-full max-w-lg relative"
+          >
+            <button
+              onClick={() => setSelectedClaim(null)}
+              className="absolute top-3 right-3 text-gray-400 hover:text-gray-100 text-lg"
+            >
+              ✕
+            </button>
+
+            <h2 className="text-xl font-bold mb-4 text-ubGold">
+              Claim Details
+            </h2>
+
+            {selectedClaim.itemImage && (
+              <img
+                src={selectedClaim.itemImage}
+                alt="Item Image"
+                className="w-full h-48 object-cover rounded-lg mb-4"
+              />
+            )}
+
+            <div className="space-y-2 text-gray-700 dark:text-gray-300">
+              <p>
+                <strong>Item:</strong> {selectedClaim.itemName ?? "—"}
+              </p>
+              <p>
+                <strong>Campus:</strong> {selectedClaim.itemCampus ?? "—"}
+              </p>
+              <p>
+                <strong>Description:</strong> {selectedClaim.itemDesc ?? "—"}
+              </p>
+              <p>
+                <strong>Claimant:</strong>{" "}
+                {selectedClaim.claimantName ?? "—"}
+              </p>
+              <p>
+                <strong>Email:</strong> {selectedClaim.claimantEmail ?? "—"}
+              </p>
+              <p>
+                <strong>Phone:</strong> {selectedClaim.claimantPhone ?? "—"}
+              </p>
+              <p>
+                <strong>Message:</strong> {selectedClaim.message ?? "—"}
+              </p>
+              <p>
+                <strong>Status:</strong>{" "}
+                {selectedClaim.status
+                  ? selectedClaim.status.charAt(0).toUpperCase() +
+                    selectedClaim.status.slice(1)
+                  : "Pending"}
+              </p>
+              <p>
+                <strong>Date:</strong>{" "}
+                {selectedClaim.created_at
+                  ? new Date(selectedClaim.created_at).toLocaleString("en-BZ")
+                  : "—"}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

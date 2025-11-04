@@ -14,14 +14,37 @@ export default function LoginPage() {
   const [message, setMessage] = useState("");
   const router = useRouter();
 
-  // ✅ Redirect if already logged in (regular user)
+  // ✅ Redirect if already logged in (admin or user)
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) router.replace("/items");
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (session) {
+        const email = session.user?.email;
+
+        // Check role from profiles
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("email", email)
+          .single();
+
+        if (profile?.role === "admin") {
+          localStorage.setItem("userRole", "admin");
+          router.replace("/admin");
+        } else {
+          localStorage.setItem("userRole", "user");
+          router.replace("/items");
+        }
+      } else {
+        const manualAdmin = localStorage.getItem("isManualAdmin");
+        const storedSession = localStorage.getItem("adminSession");
+        if (manualAdmin && storedSession) {
+          router.replace("/admin");
+        }
+      }
     });
   }, [router]);
 
-  // ✅ Regular UB email or admin login
+  // ✅ Regular UB Email Login
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -29,57 +52,82 @@ export default function LoginPage() {
 
     const trimmedEmail = email.trim().toLowerCase();
 
-    // 🧩 If typed "admin" or "admin@system.local", go to admin mode
+    // Switch to admin mode
     if (trimmedEmail === "admin" || trimmedEmail === "admin@system.local") {
       setAdminMode(true);
       setLoading(false);
       return;
     }
 
-    // ✅ Validate UB email
+    // Validate UB email
     if (!trimmedEmail.endsWith("@ub.edu.bz")) {
       setMessage("❌ Please use your UB email address or admin@system.local");
       setLoading(false);
       return;
     }
 
-    // ✅ Send Supabase magic link
+    // Send Supabase magic link
     const { error } = await supabase.auth.signInWithOtp({
       email: trimmedEmail,
       options: { emailRedirectTo: `${location.origin}/auth/callback` },
     });
 
-    if (error) {
-      setMessage(`❌ ${error.message}`);
-    } else {
-      setMessage("✅ Check your UB email for a login link!");
-    }
+    if (error) setMessage(`❌ ${error.message}`);
+    else setMessage("✅ Check your UB email for a login link!");
 
     setLoading(false);
   };
 
-  // ✅ Manual Admin Login (Password Protected)
-  const handleAdminLogin = (e: React.FormEvent) => {
+  // ✅ Admin Login (role-based + persistent)
+  const handleAdminLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setMessage("");
 
-    const ADMIN_PASSWORD =
-      process.env.NEXT_PUBLIC_ADMIN_PASSWORD || "Admin@1234";
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: "admin@system.local",
+        password: adminPassword,
+      });
 
-    if (adminPassword === ADMIN_PASSWORD) {
-      // ✅ Save admin flag in localStorage for session persistence
-      localStorage.setItem("isManualAdmin", "true");
+      if (error) {
+        console.error("Admin login failed:", error);
+        setMessage("❌ " + error.message);
+        setLoading(false);
+        return;
+      }
+
+      // 🔎 Verify role from profiles
+      const { data: profile, error: profileErr } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("email", "admin@system.local")
+        .single();
+
+      if (profileErr || !profile || profile.role !== "admin") {
+        setMessage("❌ Unauthorized: not an admin account");
+        await supabase.auth.signOut();
+        setLoading(false);
+        return;
+      }
+
+      // ✅ Store session locally for persistence
+      if (data.session) {
+        localStorage.setItem("isManualAdmin", "true");
+        localStorage.setItem("adminSession", JSON.stringify(data.session));
+        localStorage.setItem("userRole", "admin");
+      }
 
       setMessage("✅ Welcome, Admin! Redirecting...");
       setTimeout(() => {
         router.push("/admin");
-      }, 1200);
-    } else {
-      setMessage("❌ Incorrect admin password");
+      }, 1000);
+    } catch (err: any) {
+      console.error(err);
+      setMessage("❌ Login error");
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   };
 
   return (
@@ -104,7 +152,6 @@ export default function LoginPage() {
               className="w-full p-3 rounded-lg border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:ring-2 focus:ring-ubGold focus:outline-none"
               required
             />
-
             <button
               type="submit"
               disabled={loading}
@@ -118,7 +165,7 @@ export default function LoginPage() {
             </button>
           </form>
         ) : (
-          // 🧩 Admin Login Mode
+          // 🧩 Admin Login
           <form onSubmit={handleAdminLogin} className="space-y-4">
             <input
               type="password"
@@ -128,7 +175,6 @@ export default function LoginPage() {
               className="w-full p-3 rounded-lg border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:ring-2 focus:ring-red-500 focus:outline-none"
               required
             />
-
             <button
               type="submit"
               disabled={loading}
@@ -140,7 +186,6 @@ export default function LoginPage() {
             >
               {loading ? "Checking..." : "Login as Admin"}
             </button>
-
             <button
               type="button"
               onClick={() => {
@@ -155,7 +200,7 @@ export default function LoginPage() {
           </form>
         )}
 
-        {/* 🧾 Feedback Message */}
+        {/* 🧾 Feedback */}
         {message && (
           <p
             className={`mt-4 text-center text-sm font-medium ${
