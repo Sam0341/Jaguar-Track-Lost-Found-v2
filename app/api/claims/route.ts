@@ -3,9 +3,9 @@ import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 
-/**
- * Dev bypass helper (for localhost or x-dev-admin header)
- */
+/* ----------------------------------------------------------
+ * 🧠 Utility: Dev Bypass Helper
+ * ---------------------------------------------------------- */
 function isDevBypass(req: Request) {
   const origin = req.headers.get("origin") || req.headers.get("referer") || "";
   const host = req.headers.get("host") || "";
@@ -26,9 +26,9 @@ function isDevBypass(req: Request) {
   return (devEnv && originIsLocal) || secretOk;
 }
 
-/**
- * Create a Supabase admin client (service key)
- */
+/* ----------------------------------------------------------
+ * 🧠 Utility: Create Admin Supabase Client (Service Key)
+ * ---------------------------------------------------------- */
 function createAdminClient() {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -37,9 +37,27 @@ function createAdminClient() {
   );
 }
 
-/**
- * ✅ GET /api/claims - Fetch all claims (admin)
- */
+/* ----------------------------------------------------------
+ * 🧠 Utility: Get Supabase User from Authorization Header
+ * ---------------------------------------------------------- */
+async function getSupabaseUserFromToken(req: Request) {
+  const authHeader = req.headers.get("authorization");
+  const token = authHeader?.startsWith("Bearer ") ? authHeader.split(" ")[1] : null;
+  if (!token) return null;
+
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
+
+  const { data, error } = await supabase.auth.getUser(token);
+  if (error || !data?.user) return null;
+  return data.user;
+}
+
+/* ==========================================================
+ * ✅ GET /api/claims → Fetch all claims (Admin)
+ * ========================================================== */
 export async function GET(req: Request) {
   try {
     const cookieClient = createRouteHandlerClient({ cookies });
@@ -48,7 +66,6 @@ export async function GET(req: Request) {
       error: userError,
     } = await cookieClient.auth.getUser();
 
-    // 🔐 Use service key if no valid session (on Vercel)
     const isBypass = isDevBypass(req);
     const supabase = !user && !isBypass ? createAdminClient() : cookieClient;
 
@@ -69,27 +86,22 @@ export async function GET(req: Request) {
   }
 }
 
-/**
- * ✅ POST /api/claims - Create a new claim
- */
+/* ==========================================================
+ * ✅ POST /api/claims → Submit a new claim (User)
+ * ========================================================== */
 export async function POST(req: Request) {
   try {
     const cookieClient = createRouteHandlerClient({ cookies });
-    const {
-      data: { user },
-      error: userError,
-    } = await cookieClient.auth.getUser();
+    let user = await getSupabaseUserFromToken(req); // header first
 
-    let devBypassed = false;
-    if (userError || !user) {
-      if (!isDevBypass(req)) {
+    if (!user) {
+      const { data, error } = await cookieClient.auth.getUser();
+      user = data?.user;
+      if (error || !user) {
         return NextResponse.json(
           { success: false, error: "Unauthorized – no valid session" },
           { status: 401 }
         );
-      } else {
-        devBypassed = true;
-        console.warn("⚠️ Dev bypass used for POST /api/claims");
       }
     }
 
@@ -100,16 +112,10 @@ export async function POST(req: Request) {
         { status: 400 }
       );
 
-    const claimedBy = devBypassed
-      ? process.env.DEV_ADMIN_ID || null
-      : user?.id || null;
-
-    const supabase = devBypassed ? createAdminClient() : cookieClient;
-
-    const { error } = await supabase.from("claims").insert([
+    const { error } = await cookieClient.from("claims").insert([
       {
         item_id,
-        claimed_by: claimedBy,
+        claimed_by: user.id,
         message: message || "",
         status: "pending",
       },
@@ -119,7 +125,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       success: true,
-      message: "Claim submitted successfully.",
+      message: "Claim submitted successfully!",
     });
   } catch (err: any) {
     console.error("🔥 POST /claims error:", err.message);
@@ -130,9 +136,9 @@ export async function POST(req: Request) {
   }
 }
 
-/**
- * ✅ PATCH /api/claims - Approve or reject a claim (admin)
- */
+/* ==========================================================
+ * ✅ PATCH /api/claims → Approve or reject a claim (Admin)
+ * ========================================================== */
 export async function PATCH(req: Request) {
   try {
     const cookieClient = createRouteHandlerClient({ cookies });
@@ -140,6 +146,9 @@ export async function PATCH(req: Request) {
       data: { user },
       error: userError,
     } = await cookieClient.auth.getUser();
+
+    const isBypass = isDevBypass(req);
+    const supabase = !user && !isBypass ? createAdminClient() : cookieClient;
 
     const { claim_id, status } = await req.json();
     if (!claim_id || !status)
@@ -149,10 +158,8 @@ export async function PATCH(req: Request) {
       );
 
     const normalizedStatus = String(status).toLowerCase();
-    const isBypass = isDevBypass(req);
-    const supabase = !user && !isBypass ? createAdminClient() : cookieClient;
 
-    // Update claim
+    // Update claim status
     const { error: updateError } = await supabase
       .from("claims")
       .update({ status: normalizedStatus })
@@ -160,7 +167,7 @@ export async function PATCH(req: Request) {
 
     if (updateError) throw updateError;
 
-    // If approved, also mark related item as "Claimed"
+    // If approved, mark related item as "Claimed"
     if (normalizedStatus === "approved") {
       const { data: claimData } = await supabase
         .from("claims")
