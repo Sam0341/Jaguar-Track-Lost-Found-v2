@@ -63,7 +63,7 @@ export default function AdminClaimsPage() {
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
       await res.json(); // we only use this to ensure auth is fine
 
-      // ✅ Direct Supabase join query
+      // ✅ Direct Supabase join query (fix: specify item_id relationship)
       const { data, error } = await supabase
         .from("claims")
         .select(
@@ -72,7 +72,7 @@ export default function AdminClaimsPage() {
           message,
           status,
           created_at,
-          items (
+          items:item_id (
             id,
             name,
             campus,
@@ -91,7 +91,6 @@ export default function AdminClaimsPage() {
 
       if (error) throw error;
 
-      // Use "as any" here to silence deep type mismatch from Supabase
       setClaims((data as any) || []);
     } catch (err: any) {
       console.error("Fetch claims error:", err);
