@@ -91,20 +91,23 @@ export async function GET(req: Request) {
  * ========================================================== */
 export async function POST(req: Request) {
   try {
-    // Try header-based token first
-    let user = await getSupabaseUserFromToken(req);
+    let user: any = await getSupabaseUserFromToken(req);
 
-    // Fallback: get from cookies
     const cookieClient = createRouteHandlerClient({ cookies });
     if (!user) {
       const { data, error } = await cookieClient.auth.getUser();
-      user = data?.user;
-      if (error || !user) {
+      if (error || !data?.user) {
         return NextResponse.json(
           { success: false, error: "Unauthorized – no valid session" },
           { status: 401 }
         );
       }
+
+      // Dummy token just to satisfy TS and maintain type consistency
+      user = {
+        ...data.user,
+        access_token: "",
+      };
     }
 
     const { item_id, message } = await req.json();
@@ -115,21 +118,23 @@ export async function POST(req: Request) {
       );
     }
 
-    // ✅ Create a Supabase client with user's auth token (so RLS works)
-    const userClient = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        global: {
-          headers: {
-            Authorization: `Bearer ${user.access_token}`,
-          },
-        },
-      }
-    );
+    // ✅ Choose proper Supabase client depending on token
+    const supabaseClient = user.access_token
+      ? createClient(
+          process.env.NEXT_PUBLIC_SUPABASE_URL!,
+          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+          {
+            global: {
+              headers: {
+                Authorization: `Bearer ${user.access_token}`,
+              },
+            },
+          }
+        )
+      : cookieClient;
 
-    // ✅ Insert claim with RLS context
-    const { error } = await userClient.from("claims").insert([
+    // ✅ Insert claim (RLS will check claimed_by)
+    const { error } = await supabaseClient.from("claims").insert([
       {
         item_id,
         claimed_by: user.id,
@@ -176,7 +181,6 @@ export async function PATCH(req: Request) {
 
     const normalizedStatus = String(status).toLowerCase();
 
-    // Update claim status
     const { error: updateError } = await supabase
       .from("claims")
       .update({ status: normalizedStatus })
@@ -184,7 +188,6 @@ export async function PATCH(req: Request) {
 
     if (updateError) throw updateError;
 
-    // If approved, mark related item as "Claimed"
     if (normalizedStatus === "approved") {
       const { data: claimData } = await supabase
         .from("claims")
