@@ -3,23 +3,24 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
-type ClaimRaw = {
+type ClaimView = {
   id: string;
-  item_id: string;
-  claimed_by?: string | null;
-  message?: string | null;
-  status?: string | null;
-  created_at?: string | null;
-};
-
-type ClaimView = ClaimRaw & {
-  itemName?: string | null;
-  itemCampus?: string | null;
-  itemImage?: string | null;
-  itemDesc?: string | null;
-  claimantEmail?: string | null;
-  claimantName?: string | null;
-  claimantPhone?: string | null;
+  message: string | null;
+  status: string | null;
+  created_at: string | null;
+  items?: {
+    id: string;
+    name: string;
+    campus: string;
+    description: string;
+    image: string;
+  } | null;
+  profiles?: {
+    id: string;
+    full_name: string;
+    email: string;
+    phone: string;
+  } | null;
 };
 
 export default function AdminClaimsPage() {
@@ -34,11 +35,11 @@ export default function AdminClaimsPage() {
     typeof window !== "undefined" && window.location.hostname.includes("localhost");
 
   useEffect(() => {
-    fetchAndHydrateClaims();
+    fetchClaims();
   }, []);
 
-  // 🧠 Fetch all claims and hydrate
-  async function fetchAndHydrateClaims() {
+  // 🧠 Fetch all claims (joined with items + profiles)
+  async function fetchClaims() {
     setLoading(true);
     setErrorMsg(null);
 
@@ -57,49 +58,34 @@ export default function AdminClaimsPage() {
 
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
       const rawData = await res.json();
-      const rawClaims: ClaimRaw[] =
-        Array.isArray(rawData) ? rawData : rawData?.claims || rawData?.data || [];
 
-      const hydrated = await Promise.all(
-        rawClaims.map(async (c) => {
-          const view: ClaimView = { ...c };
+      // Instead of hydrating manually, join directly
+      const { data, error } = await supabase
+        .from("claims")
+        .select(`
+          id,
+          message,
+          status,
+          created_at,
+          items (
+            id,
+            name,
+            campus,
+            description,
+            image
+          ),
+          profiles:claimed_by (
+            id,
+            full_name,
+            email,
+            phone
+          )
+        `)
+        .order("created_at", { ascending: false });
 
-          // 📦 Item details
-          if (c.item_id) {
-            const { data: item, error: itemErr } = await supabase
-              .from("items")
-              .select("name, campus, image_url, description")
-              .eq("id", c.item_id)
-              .single();
+      if (error) throw error;
 
-            if (!itemErr && item) {
-              view.itemName = item.name;
-              view.itemCampus = item.campus;
-              view.itemImage = item.image_url;
-              view.itemDesc = item.description;
-            }
-          }
-
-          // 👤 Claimant details
-          if (c.claimed_by) {
-            const { data: profile, error: profileErr } = await supabase
-              .from("profiles")
-              .select("full_name, email, phone")
-              .eq("id", c.claimed_by)
-              .single();
-
-            if (!profileErr && profile) {
-              view.claimantEmail = profile.email;
-              view.claimantName = profile.full_name;
-              view.claimantPhone = profile.phone;
-            }
-          }
-
-          return view;
-        })
-      );
-
-      setClaims(hydrated);
+      setClaims(data || []);
     } catch (err: any) {
       console.error("Fetch claims error:", err);
       setErrorMsg(err.message || "Failed to fetch claims");
@@ -129,7 +115,6 @@ export default function AdminClaimsPage() {
 
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
 
-      // Update UI
       setClaims((prev) =>
         prev.map((c) => (c.id === claimId ? { ...c, status } : c))
       );
@@ -143,7 +128,6 @@ export default function AdminClaimsPage() {
     }
   }
 
-  // 💨 ESC to close modals
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -163,7 +147,7 @@ export default function AdminClaimsPage() {
         Failed to load claims: {errorMsg}
         <br />
         <button
-          onClick={fetchAndHydrateClaims}
+          onClick={fetchClaims}
           className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-md"
         >
           Retry
@@ -196,15 +180,15 @@ export default function AdminClaimsPage() {
                 className="border-b dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
               >
                 <td className="px-4 py-3 font-semibold text-ubGold">
-                  {c.itemName ?? "—"}
+                  {c.items?.name ?? "—"}
                 </td>
                 <td className="px-4 py-3 text-sm text-gray-400">
-                  {c.itemCampus ?? "—"}
+                  {c.items?.campus ?? "—"}
                 </td>
                 <td className="px-4 py-3 text-sm">
-                  {c.claimantName
-                    ? `${c.claimantName} (${c.claimantEmail})`
-                    : c.claimantEmail ?? "—"}
+                  {c.profiles?.full_name
+                    ? `${c.profiles.full_name} (${c.profiles.email})`
+                    : c.profiles?.email ?? "—"}
                 </td>
                 <td className="px-4 py-3 max-w-xs truncate">{c.message ?? "—"}</td>
                 <td className="px-4 py-3">
@@ -272,43 +256,30 @@ export default function AdminClaimsPage() {
               ✕
             </button>
 
-            <h2 className="text-xl font-bold mb-4 text-ubGold">
-              Claim Details
-            </h2>
+            <h2 className="text-xl font-bold mb-4 text-ubGold">Claim Details</h2>
 
-            {selectedClaim.itemImage && (
+            {selectedClaim.items?.image && (
               <img
-                src={selectedClaim.itemImage}
-                alt="Item Image"
-                onClick={() => setZoomImage(selectedClaim.itemImage!)}
+                src={`https://npudlbublntelxzmzlmu.supabase.co/storage/v1/object/public/item-photos/${selectedClaim.items.image}`}
+                alt="Item"
+                onClick={() =>
+                  setZoomImage(
+                    `https://npudlbublntelxzmzlmu.supabase.co/storage/v1/object/public/item-photos/${selectedClaim.items?.image}`
+                  )
+                }
                 className="w-full h-48 object-cover rounded-lg mb-4 cursor-zoom-in hover:opacity-90 transition"
               />
             )}
 
             <div className="space-y-2 text-gray-700 dark:text-gray-300">
-              <p>
-                <strong>Item:</strong> {selectedClaim.itemName ?? "—"}
-              </p>
-              <p>
-                <strong>Campus:</strong> {selectedClaim.itemCampus ?? "—"}
-              </p>
-              <p>
-                <strong>Description:</strong> {selectedClaim.itemDesc ?? "—"}
-              </p>
+              <p><strong>Item:</strong> {selectedClaim.items?.name ?? "—"}</p>
+              <p><strong>Campus:</strong> {selectedClaim.items?.campus ?? "—"}</p>
+              <p><strong>Description:</strong> {selectedClaim.items?.description ?? "—"}</p>
               <hr className="my-2 border-gray-600" />
-              <p>
-                <strong>Claimant:</strong>{" "}
-                {selectedClaim.claimantName ?? "—"}
-              </p>
-              <p>
-                <strong>Email:</strong> {selectedClaim.claimantEmail ?? "—"}
-              </p>
-              <p>
-                <strong>Phone:</strong> {selectedClaim.claimantPhone ?? "—"}
-              </p>
-              <p>
-                <strong>Message:</strong> {selectedClaim.message ?? "—"}
-              </p>
+              <p><strong>Claimant:</strong> {selectedClaim.profiles?.full_name ?? "—"}</p>
+              <p><strong>Email:</strong> {selectedClaim.profiles?.email ?? "—"}</p>
+              <p><strong>Phone:</strong> {selectedClaim.profiles?.phone ?? "—"}</p>
+              <p><strong>Message:</strong> {selectedClaim.message ?? "—"}</p>
               <p>
                 <strong>Status:</strong>{" "}
                 {selectedClaim.status
@@ -327,7 +298,6 @@ export default function AdminClaimsPage() {
         </div>
       )}
 
-      {/* 🔍 Image Lightbox */}
       {zoomImage && (
         <div
           onClick={() => setZoomImage(null)}
