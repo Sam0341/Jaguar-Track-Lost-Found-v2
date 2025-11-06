@@ -23,16 +23,13 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
       const currentUser = userData?.user;
       setUser(currentUser);
 
-      // 👩‍💼 Check if admin
-      if (currentUser?.user_metadata?.role === "admin") {
-        setIsAdmin(true);
-      }
+      if (currentUser?.user_metadata?.role === "admin") setIsAdmin(true);
 
       // 📦 Fetch item details
       const data = await getItemById(params.id);
       setItem(data);
 
-      // 🔍 Check if user already made a claim for this item
+      // 🔍 Check if this user already made a claim for this item
       if (currentUser) {
         const { data: existingClaims, error } = await supabase
           .from("claims")
@@ -41,16 +38,21 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
           .eq("claimed_by", currentUser.id)
           .maybeSingle();
 
-        if (!error && existingClaims) {
-          setClaimStatus(existingClaims.status);
-        }
+        if (!error && existingClaims) setClaimStatus(existingClaims.status);
       }
     }
 
     fetchItemData();
+
+    // 🔄 Keep user state synced with session changes
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    return () => listener?.subscription.unsubscribe();
   }, [params.id]);
 
-  // 📨 Handle claim submission
+  // 📨 Handle claim submission (✅ fixed for live/Vercel)
   const handleClaimSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -62,13 +64,22 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
     setFeedback("Submitting your claim...");
 
     try {
-      // ✅ Send session cookies along with the request
+      // ✅ Get Supabase session and access token
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !sessionData.session) {
+        setFeedback("❌ No valid session found. Please log in again.");
+        return;
+      }
+
+      const token = sessionData.session.access_token;
+
+      // ✅ Send claim request with auth header
       const res = await fetch("/api/claims", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
         },
-        credentials: "include", // 🔑 ensures Supabase cookies are sent to API route
         body: JSON.stringify({
           item_id: item?.id,
           message: claimMessage,
@@ -77,7 +88,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
 
       const data = await res.json();
 
-      if (data.success) {
+      if (res.ok && data.success) {
         setFeedback("✅ Claim submitted successfully! Awaiting admin approval.");
         setClaimStatus("Pending");
         setShowClaimForm(false);
@@ -99,7 +110,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
       : `${SUPABASE_URL}/${item.image}`
     : "https://placehold.co/600x400?text=No+Image+Available";
 
-  // ⏰ Format time nicely
+  // ⏰ Format timestamp
   const formatDateTime = (timestamp: string) =>
     new Date(timestamp).toLocaleString("en-US", {
       weekday: "short",
@@ -111,6 +122,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
       hour12: true,
     });
 
+  // ⏳ Loading state
   if (!item)
     return (
       <div className="flex items-center justify-center h-64 text-gray-500 dark:text-gray-400">
@@ -121,7 +133,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
   return (
     <div className="container mx-auto px-4 py-6">
       <div className="grid md:grid-cols-2 gap-6">
-        {/* 🖼️ Image */}
+        {/* 🖼️ Item Image */}
         <div className="rounded-2xl overflow-hidden bg-gray-100 dark:bg-gray-800">
           <img
             src={imageSrc}
@@ -135,14 +147,12 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
           />
         </div>
 
-        {/* 🧾 Details */}
+        {/* 🧾 Item Details */}
         <div className="bg-white dark:bg-gray-900 rounded-2xl p-6 shadow border border-gray-200 dark:border-gray-700">
           <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
             {item.name}
           </h1>
-          <p className="text-gray-700 dark:text-gray-400 mt-2">
-            {item.description}
-          </p>
+          <p className="text-gray-700 dark:text-gray-400 mt-2">{item.description}</p>
 
           {/* 🏷️ Tags */}
           <div className="flex flex-wrap gap-2 mt-4">
@@ -187,13 +197,11 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
                 </p>
               ) : claimStatus === "Approved" ? (
                 <p className="mt-6 text-green-600 font-medium text-center">
-                  ✅ Your claim has been approved! Please collect it from the
-                  secretary.
+                  ✅ Your claim has been approved! Please collect it from the secretary.
                 </p>
               ) : claimStatus === "Rejected" ? (
                 <p className="mt-6 text-red-600 font-medium text-center">
-                  ❌ Your claim was rejected. Please contact the secretary for
-                  details.
+                  ❌ Your claim was rejected. Please contact the secretary for details.
                 </p>
               ) : (
                 <button
@@ -228,6 +236,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
             </form>
           )}
 
+          {/* 🗨️ Feedback */}
           {feedback && (
             <p
               className={`mt-3 text-center font-medium ${
