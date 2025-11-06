@@ -52,7 +52,7 @@ async function getSupabaseUserFromToken(req: Request) {
 
   const { data, error } = await supabase.auth.getUser(token);
   if (error || !data?.user) return null;
-  return data.user;
+  return { ...data.user, access_token: token };
 }
 
 /* ==========================================================
@@ -91,9 +91,11 @@ export async function GET(req: Request) {
  * ========================================================== */
 export async function POST(req: Request) {
   try {
-    const cookieClient = createRouteHandlerClient({ cookies });
-    let user = await getSupabaseUserFromToken(req); // header first
+    // Try header-based token first
+    let user = await getSupabaseUserFromToken(req);
 
+    // Fallback: get from cookies
+    const cookieClient = createRouteHandlerClient({ cookies });
     if (!user) {
       const { data, error } = await cookieClient.auth.getUser();
       user = data?.user;
@@ -106,13 +108,28 @@ export async function POST(req: Request) {
     }
 
     const { item_id, message } = await req.json();
-    if (!item_id)
+    if (!item_id) {
       return NextResponse.json(
         { success: false, error: "Missing item_id" },
         { status: 400 }
       );
+    }
 
-    const { error } = await cookieClient.from("claims").insert([
+    // ✅ Create a Supabase client with user's auth token (so RLS works)
+    const userClient = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        global: {
+          headers: {
+            Authorization: `Bearer ${user.access_token}`,
+          },
+        },
+      }
+    );
+
+    // ✅ Insert claim with RLS context
+    const { error } = await userClient.from("claims").insert([
       {
         item_id,
         claimed_by: user.id,
