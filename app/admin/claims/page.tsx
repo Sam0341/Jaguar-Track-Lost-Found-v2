@@ -23,8 +23,8 @@ type ClaimView = {
   message: string | null;
   status: string | null;
   created_at: string | null;
-  items?: ItemData | null;
-  profiles?: ProfileData | null;
+  items: ItemData | null;
+  profiles: ProfileData | null;
 };
 
 export default function AdminClaimsPage() {
@@ -42,7 +42,7 @@ export default function AdminClaimsPage() {
     fetchClaims();
   }, []);
 
-  // 🧠 Fetch all claims (joined with items + profiles)
+  // 🧠 Fetch all claims joined with items + profiles
   async function fetchClaims() {
     setLoading(true);
     setErrorMsg(null);
@@ -61,13 +61,11 @@ export default function AdminClaimsPage() {
       });
 
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-      await res.json(); // we only use this to ensure auth is fine
+      await res.json(); // verify auth response
 
-      // ✅ Direct Supabase join query (fix: specify item_id relationship)
       const { data, error } = await supabase
         .from("claims")
-        .select(
-          `
+        .select(`
           id,
           message,
           status,
@@ -85,12 +83,10 @@ export default function AdminClaimsPage() {
             email,
             phone
           )
-        `
-        )
+        `)
         .order("created_at", { ascending: false });
 
       if (error) throw error;
-
       setClaims((data as any) || []);
     } catch (err: any) {
       console.error("Fetch claims error:", err);
@@ -100,7 +96,7 @@ export default function AdminClaimsPage() {
     }
   }
 
-  // 🟢 Update claim status
+  // 🟢 Approve / Reject claim
   async function updateClaimStatus(claimId: string, status: "approved" | "rejected") {
     setActionLoading(claimId);
     setErrorMsg(null);
@@ -146,7 +142,8 @@ export default function AdminClaimsPage() {
     return () => window.removeEventListener("keydown", handleEsc);
   }, []);
 
-  if (loading) return <div className="text-center py-16 text-gray-400">Loading claims...</div>;
+  if (loading)
+    return <div className="text-center py-16 text-gray-400">Loading claims...</div>;
 
   if (errorMsg)
     return (
@@ -246,7 +243,7 @@ export default function AdminClaimsPage() {
         </table>
       </div>
 
-      {/* 🪟 Claim Details Modal */}
+      {/* Modal */}
       {selectedClaim && (
         <div
           onClick={() => setSelectedClaim(null)}
