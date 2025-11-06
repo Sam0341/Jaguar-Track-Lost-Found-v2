@@ -3,24 +3,28 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
+type ItemData = {
+  id: string;
+  name: string;
+  campus: string;
+  description: string;
+  image?: string | null;
+};
+
+type ProfileData = {
+  id: string;
+  full_name: string;
+  email: string;
+  phone?: string | null;
+};
+
 type ClaimView = {
   id: string;
   message: string | null;
   status: string | null;
   created_at: string | null;
-  items?: {
-    id: string;
-    name: string;
-    campus: string;
-    description: string;
-    image: string;
-  } | null;
-  profiles?: {
-    id: string;
-    full_name: string;
-    email: string;
-    phone: string;
-  } | null;
+  items?: ItemData | null;
+  profiles?: ProfileData | null;
 };
 
 export default function AdminClaimsPage() {
@@ -57,12 +61,13 @@ export default function AdminClaimsPage() {
       });
 
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-      const rawData = await res.json();
+      await res.json(); // we only use this to ensure auth is fine
 
-      // Instead of hydrating manually, join directly
+      // ✅ Direct Supabase join query
       const { data, error } = await supabase
         .from("claims")
-        .select(`
+        .select(
+          `
           id,
           message,
           status,
@@ -80,12 +85,14 @@ export default function AdminClaimsPage() {
             email,
             phone
           )
-        `)
+        `
+        )
         .order("created_at", { ascending: false });
 
       if (error) throw error;
 
-      setClaims(data || []);
+      // Use "as any" here to silence deep type mismatch from Supabase
+      setClaims((data as any) || []);
     } catch (err: any) {
       console.error("Fetch claims error:", err);
       setErrorMsg(err.message || "Failed to fetch claims");
@@ -128,6 +135,7 @@ export default function AdminClaimsPage() {
     }
   }
 
+  // 💨 ESC closes modals
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
