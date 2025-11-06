@@ -51,6 +51,7 @@ export default function AdminClaimsPage() {
       const session = (await supabase.auth.getSession()).data.session;
       const token = session?.access_token;
 
+      // optional API call for auth validation
       const res = await fetch("/api/claims", {
         method: "GET",
         credentials: "include",
@@ -63,6 +64,7 @@ export default function AdminClaimsPage() {
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
       await res.json(); // verify auth response
 
+      // ✅ Explicitly reference correct foreign key relationships
       const { data, error } = await supabase
         .from("claims")
         .select(`
@@ -70,14 +72,14 @@ export default function AdminClaimsPage() {
           message,
           status,
           created_at,
-          items:item_id (
+          items:claims_item_id_fkey (
             id,
             name,
             campus,
             description,
             image
           ),
-          profiles:claimed_by (
+          profiles:fk_claims_claimed_by (
             id,
             full_name,
             email,
@@ -243,7 +245,7 @@ export default function AdminClaimsPage() {
         </table>
       </div>
 
-      {/* Modal */}
+      {/* 🪟 Modal */}
       {selectedClaim && (
         <div
           onClick={() => setSelectedClaim(null)}
