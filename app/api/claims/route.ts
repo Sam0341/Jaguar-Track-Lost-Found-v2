@@ -210,38 +210,40 @@ export async function PATCH(req: Request) {
       .eq("id", claim_id)
       .single();
 
-    // 🔧 Fix: profiles can be an array
-    const claimantProfile = Array.isArray(fullClaim?.profiles)
-      ? fullClaim.profiles[0]
-      : fullClaim.profiles;
+    // ✅ Make sure fullClaim exists
+    if (fullClaim) {
+      const claimantProfile = Array.isArray(fullClaim.profiles)
+        ? fullClaim.profiles[0]
+        : fullClaim.profiles;
 
-    if (claimantProfile?.email && process.env.RESEND_API_KEY) {
-      try {
-        const resend = new Resend(process.env.RESEND_API_KEY!);
-        const claimantEmail = claimantProfile.email;
-        const itemName = fullClaim.items?.name || "your claimed item";
+      if (claimantProfile?.email && process.env.RESEND_API_KEY) {
+        try {
+          const resend = new Resend(process.env.RESEND_API_KEY!);
+          const claimantEmail = claimantProfile.email;
+          const itemName = fullClaim.items?.name || "your claimed item";
 
-        await resend.emails.send({
-          from:
-            process.env.RESEND_FROM_EMAIL ||
-            "JaguarTrack <noreply@jaguartrack.com>",
-          to: claimantEmail,
-          subject: `Your claim for "${itemName}" has been ${normalizedStatus}`,
-          html: `
-            <h2>Jaguar Track Lost & Found</h2>
-            <p>Hi ${claimantProfile.full_name || "there"},</p>
-            <p>Your claim for <b>${itemName}</b> has been <b>${normalizedStatus}</b>.</p>
-            ${
-              normalizedStatus === "approved"
-                ? "<p>🎉 You can now contact the admin to collect your item!</p>"
-                : "<p>😞 Unfortunately, your claim was not approved.</p>"
-            }
-            <hr/>
-            <p>Thank you for using Jaguar Track Lost & Found.</p>
-          `,
-        });
-      } catch (mailErr: any) {
-        console.warn("⚠️ Failed to send email via Resend:", mailErr.message);
+          await resend.emails.send({
+            from:
+              process.env.RESEND_FROM_EMAIL ||
+              "JaguarTrack <noreply@jaguartrack.com>",
+            to: claimantEmail,
+            subject: `Your claim for "${itemName}" has been ${normalizedStatus}`,
+            html: `
+              <h2>Jaguar Track Lost & Found</h2>
+              <p>Hi ${claimantProfile.full_name || "there"},</p>
+              <p>Your claim for <b>${itemName}</b> has been <b>${normalizedStatus}</b>.</p>
+              ${
+                normalizedStatus === "approved"
+                  ? "<p>🎉 You can now contact the admin to collect your item!</p>"
+                  : "<p>😞 Unfortunately, your claim was not approved.</p>"
+              }
+              <hr/>
+              <p>Thank you for using Jaguar Track Lost & Found.</p>
+            `,
+          });
+        } catch (mailErr: any) {
+          console.warn("⚠️ Failed to send email via Resend:", mailErr.message);
+        }
       }
     }
 
