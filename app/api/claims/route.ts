@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
+import { Resend } from "resend";
 
 /* ----------------------------------------------------------
  * 🧠 Utility: Dev Bypass Helper
@@ -63,7 +64,6 @@ export async function GET(req: Request) {
     const cookieClient = createRouteHandlerClient({ cookies });
     const {
       data: { user },
-      error: userError,
     } = await cookieClient.auth.getUser();
 
     const isBypass = isDevBypass(req);
@@ -103,11 +103,7 @@ export async function POST(req: Request) {
         );
       }
 
-      // Dummy token just to satisfy TS and maintain type consistency
-      user = {
-        ...data.user,
-        access_token: "",
-      };
+      user = { ...data.user, access_token: "" };
     }
 
     const { item_id, message } = await req.json();
@@ -118,22 +114,16 @@ export async function POST(req: Request) {
       );
     }
 
-    // ✅ Choose proper Supabase client depending on token
     const supabaseClient = user.access_token
       ? createClient(
           process.env.NEXT_PUBLIC_SUPABASE_URL!,
           process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
           {
-            global: {
-              headers: {
-                Authorization: `Bearer ${user.access_token}`,
-              },
-            },
+            global: { headers: { Authorization: `Bearer ${user.access_token}` } },
           }
         )
       : cookieClient;
 
-    // ✅ Insert claim (RLS will check claimed_by)
     const { error } = await supabaseClient.from("claims").insert([
       {
         item_id,
@@ -166,7 +156,6 @@ export async function PATCH(req: Request) {
     const cookieClient = createRouteHandlerClient({ cookies });
     const {
       data: { user },
-      error: userError,
     } = await cookieClient.auth.getUser();
 
     const isBypass = isDevBypass(req);
@@ -181,6 +170,7 @@ export async function PATCH(req: Request) {
 
     const normalizedStatus = String(status).toLowerCase();
 
+    // ✅ Update claim
     const { error: updateError } = await supabase
       .from("claims")
       .update({ status: normalizedStatus })
@@ -188,6 +178,7 @@ export async function PATCH(req: Request) {
 
     if (updateError) throw updateError;
 
+    // ✅ Update item status if approved
     if (normalizedStatus === "approved") {
       const { data: claimData } = await supabase
         .from("claims")
@@ -203,9 +194,52 @@ export async function PATCH(req: Request) {
       }
     }
 
+    /* ----------------------------------------------------------
+     * ✉️ Send Email Notification to the Claimant
+     * ---------------------------------------------------------- */
+    const { data: fullClaim } = await supabase
+      .from("claims")
+      .select(
+        `
+        id,
+        status,
+        message,
+        items ( name ),
+        profiles:claimed_by ( email, full_name )
+      `
+      )
+      .eq("id", claim_id)
+      .single();
+
+    if (fullClaim?.profiles?.email) {
+      const resend = new Resend(process.env.RESEND_API_KEY!);
+      const claimantEmail = fullClaim.profiles.email;
+      const itemName = fullClaim.items?.name || "your claimed item";
+
+      await resend.emails.send({
+        from:
+          process.env.RESEND_FROM_EMAIL ||
+          "JaguarTrack <noreply@jaguartrack.com>",
+        to: claimantEmail,
+        subject: `Your claim for "${itemName}" has been ${normalizedStatus}`,
+        html: `
+          <h2>Jaguar Track Lost & Found</h2>
+          <p>Hi ${fullClaim.profiles.full_name || "there"},</p>
+          <p>Your claim for <b>${itemName}</b> has been <b>${normalizedStatus}</b>.</p>
+          ${
+            normalizedStatus === "approved"
+              ? "<p>🎉 You can now contact the admin to collect your item!</p>"
+              : "<p>😞 Unfortunately, your claim was not approved.</p>"
+          }
+          <hr/>
+          <p>Thank you for using Jaguar Track Lost & Found.</p>
+        `,
+      });
+    }
+
     return NextResponse.json({
       success: true,
-      message: `Claim ${normalizedStatus} successfully!`,
+      message: `Claim ${normalizedStatus} successfully! Email sent if applicable.`,
     });
   } catch (err: any) {
     console.error("🔥 PATCH /claims error:", err.message);
