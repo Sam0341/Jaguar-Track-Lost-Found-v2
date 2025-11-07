@@ -103,7 +103,6 @@ export async function POST(req: Request) {
         );
       }
 
-      // Dummy token for TS consistency
       user = { ...data.user, access_token: "" };
     }
 
@@ -120,7 +119,9 @@ export async function POST(req: Request) {
           process.env.NEXT_PUBLIC_SUPABASE_URL!,
           process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
           {
-            global: { headers: { Authorization: `Bearer ${user.access_token}` } },
+            global: {
+              headers: { Authorization: `Bearer ${user.access_token}` },
+            },
           }
         )
       : cookieClient;
@@ -178,7 +179,7 @@ export async function PATCH(req: Request) {
 
     if (updateError) throw updateError;
 
-    // ✅ Update item if approved
+    // ✅ Update related item
     if (normalizedStatus === "approved") {
       const { data: claimData } = await supabase
         .from("claims")
@@ -194,67 +195,60 @@ export async function PATCH(req: Request) {
       }
     }
 
-    /* ----------------------------------------------------------
-     * ✉️ Send Email Notification to Claimant
-     * ---------------------------------------------------------- */
+    // ✅ Fetch claim details for email
     const { data: fullClaim } = await supabase
       .from("claims")
-      .select(
-        `
-        id,
-        status,
-        message,
-        items ( name ),
-        profiles:claimed_by ( email, full_name )
-      `
-      )
+      .select(`*, profiles:claimed_by (email, full_name), items:item_id (name)`)
       .eq("id", claim_id)
-      .single();
+      .maybeSingle();
 
-    // ✅ Safely check if claim & email exist
-if (fullClaim && fullClaim.profiles) {
-  const claimantProfile = Array.isArray(fullClaim.profiles)
-    ? fullClaim.profiles[0]
-    : fullClaim.profiles;
-
-  if (claimantProfile?.email && process.env.RESEND_API_KEY) {
-    try {
-      const resend = new Resend(process.env.RESEND_API_KEY!);
-      const claimantEmail = claimantProfile.email;
-
-      const itemName =
-        Array.isArray(fullClaim.items)
-          ? (fullClaim.items?.[0] as any)?.name ?? "your claimed item"
-          : (fullClaim.items as any)?.name ?? "your claimed item";
-
-      await resend.emails.send({
-        from: process.env.RESEND_FROM_EMAIL || "jaguartrack@yourdomain.com",
-        to: claimantEmail,
-        subject: `Your claim for "${itemName}" has been ${normalizedStatus}`,
-        html: `
-          <p>Hi ${claimantProfile.full_name || "there"},</p>
-          <p>Your claim for <b>${itemName}</b> has been <b>${normalizedStatus}</b>.</p>
-          <p>If you have any questions, please contact UB Lost & Found.</p>
-          <br/>
-          <p>– Jaguar Track Lost & Found Team</p>
-        `,
+    if (!fullClaim) {
+      console.warn("⚠️ No claim found for email notification.");
+      return NextResponse.json({
+        success: true,
+        message: `Claim ${normalizedStatus} successfully (no email sent).`,
       });
-    } catch (emailErr) {
-      console.error("❌ Email send error:", emailErr);
     }
-  }
-}
 
-// ✅ Final response after everything runs
-return NextResponse.json({
-  success: true,
-  message: `Claim ${normalizedStatus} successfully!`,
-});
-} catch (err: any) {
-  console.error("🔥 PATCH /claims error:", err.message);
-  return NextResponse.json(
-    { success: false, error: err.message || "Internal server error" },
-    { status: 500 }
-  );
-}
+    const claimantProfile = Array.isArray(fullClaim.profiles)
+      ? fullClaim.profiles[0]
+      : fullClaim.profiles;
+
+    if (claimantProfile?.email && process.env.RESEND_API_KEY) {
+      try {
+        const resend = new Resend(process.env.RESEND_API_KEY!);
+        const claimantEmail = claimantProfile.email;
+        const itemName =
+          Array.isArray(fullClaim.items)
+            ? (fullClaim.items?.[0] as any)?.name ?? "your claimed item"
+            : (fullClaim.items as any)?.name ?? "your claimed item";
+
+        await resend.emails.send({
+          from: process.env.RESEND_FROM_EMAIL || "jaguartrack@yourdomain.com",
+          to: claimantEmail,
+          subject: `Your claim for "${itemName}" has been ${normalizedStatus}`,
+          html: `
+            <p>Hi ${claimantProfile.full_name || "there"},</p>
+            <p>Your claim for <b>${itemName}</b> has been <b>${normalizedStatus}</b>.</p>
+            <p>If you have any questions, please contact UB Lost & Found.</p>
+            <br/>
+            <p>– Jaguar Track Lost & Found Team</p>
+          `,
+        });
+      } catch (emailErr) {
+        console.error("❌ Email send error:", emailErr);
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: `Claim ${normalizedStatus} successfully!`,
+    });
+  } catch (err: any) {
+    console.error("🔥 PATCH /claims error:", err.message);
+    return NextResponse.json(
+      { success: false, error: err.message || "Internal server error" },
+      { status: 500 }
+    );
+  }
 }
