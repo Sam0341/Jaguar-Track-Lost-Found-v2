@@ -9,7 +9,7 @@ type ItemData = {
   campus: string;
   description: string;
   image?: string | null;
-  reporter_email?: string | null; // ✅ added
+  reporter_email?: string | null;
 };
 
 type ProfileData = {
@@ -37,7 +37,8 @@ export default function AdminClaimsPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   const shouldSendDevHeader = () =>
-    typeof window !== "undefined" && window.location.hostname.includes("localhost");
+    typeof window !== "undefined" &&
+    window.location.hostname.includes("localhost");
 
   useEffect(() => {
     fetchClaims();
@@ -52,7 +53,7 @@ export default function AdminClaimsPage() {
       const session = (await supabase.auth.getSession()).data.session;
       const token = session?.access_token;
 
-      // optional API call for auth validation
+      // Validate session
       const res = await fetch("/api/claims", {
         method: "GET",
         credentials: "include",
@@ -63,9 +64,9 @@ export default function AdminClaimsPage() {
       });
 
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-      await res.json(); // verify auth response
+      await res.json();
 
-      // ✅ Explicitly reference correct foreign key relationships
+      // ✅ Clean relationship join syntax
       const { data, error } = await supabase
         .from("claims")
         .select(`
@@ -73,7 +74,9 @@ export default function AdminClaimsPage() {
           message,
           status,
           created_at,
-          items:claims_item_id_fkey (
+          item_id,
+          claimed_by,
+          items:item_id (
             id,
             name,
             campus,
@@ -81,7 +84,7 @@ export default function AdminClaimsPage() {
             image,
             reporter_email
           ),
-          profiles:fk_claims_claimed_by (
+          profiles:claimed_by (
             id,
             full_name,
             email,
@@ -101,7 +104,10 @@ export default function AdminClaimsPage() {
   }
 
   // 🟢 Approve / Reject claim
-  async function updateClaimStatus(claimId: string, status: "approved" | "rejected") {
+  async function updateClaimStatus(
+    claimId: string,
+    status: "approved" | "rejected"
+  ) {
     setActionLoading(claimId);
     setErrorMsg(null);
 
@@ -147,7 +153,11 @@ export default function AdminClaimsPage() {
   }, []);
 
   if (loading)
-    return <div className="text-center py-16 text-gray-400">Loading claims...</div>;
+    return (
+      <div className="text-center py-16 text-gray-400">
+        Loading claims...
+      </div>
+    );
 
   if (errorMsg)
     return (
@@ -173,7 +183,9 @@ export default function AdminClaimsPage() {
             <tr>
               <th className="px-4 py-3">Item</th>
               <th className="px-4 py-3">Campus</th>
-              <th className="px-4 py-3">Claimed By</th>
+              <th className="px-4 py-3">Claimant</th>
+              <th className="px-4 py-3">Claimant Email</th>
+              <th className="px-4 py-3">Reporter Email</th>
               <th className="px-4 py-3">Message</th>
               <th className="px-4 py-3">Status</th>
               <th className="px-4 py-3">Date</th>
@@ -193,12 +205,14 @@ export default function AdminClaimsPage() {
                 <td className="px-4 py-3 text-sm text-gray-400">
                   {c.items?.campus ?? "—"}
                 </td>
-                <td className="px-4 py-3 text-sm">
-                  {c.profiles?.full_name
-                    ? `${c.profiles.full_name} (${c.profiles.email})`
-                    : c.profiles?.email ?? "—"}
+                <td className="px-4 py-3">{c.profiles?.full_name ?? "—"}</td>
+                <td className="px-4 py-3">{c.profiles?.email ?? "—"}</td>
+                <td className="px-4 py-3">
+                  {c.items?.reporter_email ?? "—"}
                 </td>
-                <td className="px-4 py-3 max-w-xs truncate">{c.message ?? "—"}</td>
+                <td className="px-4 py-3 max-w-xs truncate">
+                  {c.message ?? "—"}
+                </td>
                 <td className="px-4 py-3">
                   <span
                     className={`px-3 py-1 rounded-full text-xs font-semibold ${
@@ -264,7 +278,9 @@ export default function AdminClaimsPage() {
               ✕
             </button>
 
-            <h2 className="text-xl font-bold mb-4 text-ubGold">Claim Details</h2>
+            <h2 className="text-xl font-bold mb-4 text-ubGold">
+              Claim Details
+            </h2>
 
             {selectedClaim.items?.image && (
               <img
@@ -280,15 +296,35 @@ export default function AdminClaimsPage() {
             )}
 
             <div className="space-y-2 text-gray-700 dark:text-gray-300">
-              <p><strong>Item:</strong> {selectedClaim.items?.name ?? "—"}</p>
-              <p><strong>Campus:</strong> {selectedClaim.items?.campus ?? "—"}</p>
-              <p><strong>Description:</strong> {selectedClaim.items?.description ?? "—"}</p>
+              <p>
+                <strong>Item:</strong> {selectedClaim.items?.name ?? "—"}
+              </p>
+              <p>
+                <strong>Campus:</strong> {selectedClaim.items?.campus ?? "—"}
+              </p>
+              <p>
+                <strong>Description:</strong>{" "}
+                {selectedClaim.items?.description ?? "—"}
+              </p>
               <hr className="my-2 border-gray-600" />
-              <p><strong>Claimant:</strong> {selectedClaim.profiles?.full_name ?? "—"}</p>
-              <p><strong>Claimant Email:</strong> {selectedClaim.profiles?.email ?? "—"}</p>
-              <p><strong>Reporter Email:</strong> {selectedClaim.items?.reporter_email ?? "—"}</p>
-              <p><strong>Phone:</strong> {selectedClaim.profiles?.phone ?? "—"}</p>
-              <p><strong>Message:</strong> {selectedClaim.message ?? "—"}</p>
+              <p>
+                <strong>Claimant:</strong>{" "}
+                {selectedClaim.profiles?.full_name ?? "—"}
+              </p>
+              <p>
+                <strong>Claimant Email:</strong>{" "}
+                {selectedClaim.profiles?.email ?? "—"}
+              </p>
+              <p>
+                <strong>Reporter Email:</strong>{" "}
+                {selectedClaim.items?.reporter_email ?? "—"}
+              </p>
+              <p>
+                <strong>Phone:</strong> {selectedClaim.profiles?.phone ?? "—"}
+              </p>
+              <p>
+                <strong>Message:</strong> {selectedClaim.message ?? "—"}
+              </p>
               <p>
                 <strong>Status:</strong>{" "}
                 {selectedClaim.status
