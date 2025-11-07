@@ -33,6 +33,8 @@ export default function AdminClaimsPage() {
   const [selectedClaim, setSelectedClaim] = useState<ClaimView | null>(null);
   const [zoomImage, setZoomImage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [showToast, setShowToast] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
@@ -53,7 +55,6 @@ export default function AdminClaimsPage() {
       const session = (await supabase.auth.getSession()).data.session;
       const token = session?.access_token;
 
-      // Validate session
       const res = await fetch("/api/claims", {
         method: "GET",
         credentials: "include",
@@ -66,7 +67,6 @@ export default function AdminClaimsPage() {
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
       await res.json();
 
-      // ✅ Clean relationship join syntax
       const { data, error } = await supabase
         .from("claims")
         .select(`
@@ -103,13 +103,14 @@ export default function AdminClaimsPage() {
     }
   }
 
-  // 🟢 Approve / Reject claim
+  // 🟢 Approve / Reject claim + show animated toast
   async function updateClaimStatus(
     claimId: string,
     status: "approved" | "rejected"
   ) {
     setActionLoading(claimId);
     setErrorMsg(null);
+    setToastMsg(null);
 
     try {
       const { data: sessionData } = await supabase.auth.getSession();
@@ -125,39 +126,40 @@ export default function AdminClaimsPage() {
         body: JSON.stringify({ claim_id: claimId, status }),
       });
 
-      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || `${res.statusText}`);
 
       setClaims((prev) =>
         prev.map((c) => (c.id === claimId ? { ...c, status } : c))
       );
+
+      const msg = result.message?.includes("Email sent")
+        ? `📧 Claim ${status.toUpperCase()} — Email successfully sent!`
+        : `✅ Claim ${status.toUpperCase()} — Updated successfully.`;
+
+      showToastMessage(msg, result.message?.includes("Email") ? "success" : "info");
+
       if (selectedClaim?.id === claimId)
         setSelectedClaim({ ...selectedClaim, status });
     } catch (err: any) {
       console.error("Update error:", err);
-      setErrorMsg(err.message || "Failed to update claim");
+      showToastMessage("❌ Failed to update claim: " + err.message, "error");
     } finally {
       setActionLoading(null);
     }
   }
 
-  // 💨 ESC closes modals
-  useEffect(() => {
-    const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setSelectedClaim(null);
-        setZoomImage(null);
-      }
-    };
-    window.addEventListener("keydown", handleEsc);
-    return () => window.removeEventListener("keydown", handleEsc);
-  }, []);
+  // ✨ Toast Animation Handler
+  function showToastMessage(msg: string, type: "success" | "error" | "info" = "info") {
+    setToastMsg(msg);
+    setShowToast(true);
+
+    // Auto-hide after 4 seconds
+    setTimeout(() => setShowToast(false), 4000);
+  }
 
   if (loading)
-    return (
-      <div className="text-center py-16 text-gray-400">
-        Loading claims...
-      </div>
-    );
+    return <div className="text-center py-16 text-gray-400">Loading claims...</div>;
 
   if (errorMsg)
     return (
@@ -174,22 +176,45 @@ export default function AdminClaimsPage() {
     );
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
-      <h1 className="text-2xl font-bold mb-6">Claims Management</h1>
+    <div className="p-6 max-w-7xl mx-auto relative">
+      <h1 className="text-3xl font-bold text-ubGold mb-6">Claims Management</h1>
 
-      <div className="overflow-x-auto bg-white dark:bg-gray-800 rounded-lg shadow">
+      {/* ✨ Toast Notification */}
+      <div
+        className={`fixed top-6 right-6 z-[9999] transition-all duration-500 transform ${
+          showToast
+            ? "opacity-100 translate-y-0"
+            : "opacity-0 -translate-y-10 pointer-events-none"
+        }`}
+      >
+        {toastMsg && (
+          <div
+            className={`px-5 py-3 rounded-lg shadow-lg font-medium text-sm ${
+              toastMsg.includes("❌")
+                ? "bg-red-600 text-white"
+                : toastMsg.includes("📧") || toastMsg.includes("✅")
+                ? "bg-green-600 text-white"
+                : "bg-blue-600 text-white"
+            }`}
+          >
+            {toastMsg}
+          </div>
+        )}
+      </div>
+
+      <div className="overflow-x-auto bg-white dark:bg-gray-800 rounded-xl shadow-md border border-gray-700">
         <table className="min-w-full text-sm">
-          <thead className="bg-gray-100 dark:bg-gray-700 text-left">
+          <thead className="bg-gray-100 dark:bg-gray-700 text-left text-gray-800 dark:text-gray-200">
             <tr>
-              <th className="px-4 py-3">Item</th>
-              <th className="px-4 py-3">Campus</th>
-              <th className="px-4 py-3">Claimant</th>
-              <th className="px-4 py-3">Claimant Email</th>
-              <th className="px-4 py-3">Reporter Email</th>
-              <th className="px-4 py-3">Message</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Date</th>
-              <th className="px-4 py-3">Actions</th>
+              <th className="px-5 py-3 font-semibold">Item</th>
+              <th className="px-5 py-3 font-semibold">Campus</th>
+              <th className="px-5 py-3 font-semibold">Claimant</th>
+              <th className="px-5 py-3 font-semibold">Claimant Email</th>
+              <th className="px-5 py-3 font-semibold">Reporter Email</th>
+              <th className="px-5 py-3 font-semibold">Message</th>
+              <th className="px-5 py-3 font-semibold">Status</th>
+              <th className="px-5 py-3 font-semibold">Date</th>
+              <th className="px-5 py-3 font-semibold">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -197,23 +222,21 @@ export default function AdminClaimsPage() {
               <tr
                 key={c.id}
                 onClick={() => setSelectedClaim(c)}
-                className="border-b dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
+                className="border-b dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer transition"
               >
-                <td className="px-4 py-3 font-semibold text-ubGold">
+                <td className="px-5 py-3 font-semibold text-ubGold">
                   {c.items?.name ?? "—"}
                 </td>
-                <td className="px-4 py-3 text-sm text-gray-400">
-                  {c.items?.campus ?? "—"}
-                </td>
-                <td className="px-4 py-3">{c.profiles?.full_name ?? "—"}</td>
-                <td className="px-4 py-3">{c.profiles?.email ?? "—"}</td>
-                <td className="px-4 py-3">
+                <td className="px-5 py-3 text-gray-400">{c.items?.campus ?? "—"}</td>
+                <td className="px-5 py-3">{c.profiles?.full_name ?? "—"}</td>
+                <td className="px-5 py-3">{c.profiles?.email ?? "—"}</td>
+                <td className="px-5 py-3 text-gray-300">
                   {c.items?.reporter_email ?? "—"}
                 </td>
-                <td className="px-4 py-3 max-w-xs truncate">
+                <td className="px-5 py-3 max-w-xs truncate text-gray-300">
                   {c.message ?? "—"}
                 </td>
-                <td className="px-4 py-3">
+                <td className="px-5 py-3">
                   <span
                     className={`px-3 py-1 rounded-full text-xs font-semibold ${
                       c.status?.toLowerCase() === "approved"
@@ -228,19 +251,19 @@ export default function AdminClaimsPage() {
                       : "Pending"}
                   </span>
                 </td>
-                <td className="px-4 py-3">
+                <td className="px-5 py-3 text-gray-400">
                   {c.created_at
                     ? new Date(c.created_at).toLocaleString("en-BZ")
                     : "—"}
                 </td>
-                <td className="px-4 py-3 space-x-2">
+                <td className="px-5 py-3 space-x-2">
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
                       updateClaimStatus(c.id, "approved");
                     }}
                     disabled={actionLoading !== null}
-                    className="px-3 py-1 rounded bg-green-600 text-white disabled:opacity-50"
+                    className="px-3 py-1 rounded-md bg-green-600 text-white font-medium hover:bg-green-700 disabled:opacity-50 transition"
                   >
                     Approve
                   </button>
@@ -250,7 +273,7 @@ export default function AdminClaimsPage() {
                       updateClaimStatus(c.id, "rejected");
                     }}
                     disabled={actionLoading !== null}
-                    className="px-3 py-1 rounded bg-red-600 text-white disabled:opacity-50"
+                    className="px-3 py-1 rounded-md bg-red-600 text-white font-medium hover:bg-red-700 disabled:opacity-50 transition"
                   >
                     Reject
                   </button>
@@ -261,88 +284,7 @@ export default function AdminClaimsPage() {
         </table>
       </div>
 
-      {/* 🪟 Modal */}
-      {selectedClaim && (
-        <div
-          onClick={() => setSelectedClaim(null)}
-          className="fixed inset-0 bg-black/60 z-50 flex justify-center items-center"
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="bg-white dark:bg-gray-900 rounded-xl shadow-lg p-6 w-full max-w-lg relative"
-          >
-            <button
-              onClick={() => setSelectedClaim(null)}
-              className="absolute top-3 right-3 text-gray-400 hover:text-gray-100 text-lg"
-            >
-              ✕
-            </button>
-
-            <h2 className="text-xl font-bold mb-4 text-ubGold">
-              Claim Details
-            </h2>
-
-            {selectedClaim.items?.image && (
-              <img
-                src={`https://npudlbublntelxzmzlmu.supabase.co/storage/v1/object/public/item-photos/${selectedClaim.items.image}`}
-                alt="Item"
-                onClick={() =>
-                  setZoomImage(
-                    `https://npudlbublntelxzmzlmu.supabase.co/storage/v1/object/public/item-photos/${selectedClaim.items?.image}`
-                  )
-                }
-                className="w-full h-48 object-cover rounded-lg mb-4 cursor-zoom-in hover:opacity-90 transition"
-              />
-            )}
-
-            <div className="space-y-2 text-gray-700 dark:text-gray-300">
-              <p>
-                <strong>Item:</strong> {selectedClaim.items?.name ?? "—"}
-              </p>
-              <p>
-                <strong>Campus:</strong> {selectedClaim.items?.campus ?? "—"}
-              </p>
-              <p>
-                <strong>Description:</strong>{" "}
-                {selectedClaim.items?.description ?? "—"}
-              </p>
-              <hr className="my-2 border-gray-600" />
-              <p>
-                <strong>Claimant:</strong>{" "}
-                {selectedClaim.profiles?.full_name ?? "—"}
-              </p>
-              <p>
-                <strong>Claimant Email:</strong>{" "}
-                {selectedClaim.profiles?.email ?? "—"}
-              </p>
-              <p>
-                <strong>Reporter Email:</strong>{" "}
-                {selectedClaim.items?.reporter_email ?? "—"}
-              </p>
-              <p>
-                <strong>Phone:</strong> {selectedClaim.profiles?.phone ?? "—"}
-              </p>
-              <p>
-                <strong>Message:</strong> {selectedClaim.message ?? "—"}
-              </p>
-              <p>
-                <strong>Status:</strong>{" "}
-                {selectedClaim.status
-                  ? selectedClaim.status.charAt(0).toUpperCase() +
-                    selectedClaim.status.slice(1)
-                  : "Pending"}
-              </p>
-              <p>
-                <strong>Date:</strong>{" "}
-                {selectedClaim.created_at
-                  ? new Date(selectedClaim.created_at).toLocaleString("en-BZ")
-                  : "—"}
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-
+      {/* 🔍 Zoomed Image */}
       {zoomImage && (
         <div
           onClick={() => setZoomImage(null)}
