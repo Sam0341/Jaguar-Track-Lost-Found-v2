@@ -212,55 +212,49 @@ export async function PATCH(req: Request) {
       .single();
 
     // ✅ Safely check if claim & email exist
-    if (fullClaim && fullClaim.profiles) {
-      const claimantProfile = Array.isArray(fullClaim.profiles)
-        ? fullClaim.profiles[0]
-        : fullClaim.profiles;
+if (fullClaim && fullClaim.profiles) {
+  const claimantProfile = Array.isArray(fullClaim.profiles)
+    ? fullClaim.profiles[0]
+    : fullClaim.profiles;
 
-      if (claimantProfile?.email && process.env.RESEND_API_KEY) {
-        try {
-          const resend = new Resend(process.env.RESEND_API_KEY!);
-          const claimantEmail = claimantProfile.email;
-          const itemName =
-             Array.isArray(fullClaim.items)
-                ? (fullClaim.items[0] as any)?.name || "your claimed item"
-                : (fullClaim.items as any)?.name || "your claimed item";
+  if (claimantProfile?.email && process.env.RESEND_API_KEY) {
+    try {
+      const resend = new Resend(process.env.RESEND_API_KEY!);
+      const claimantEmail = claimantProfile.email;
 
+      const itemName =
+        Array.isArray(fullClaim.items)
+          ? (fullClaim.items?.[0] as any)?.name ?? "your claimed item"
+          : (fullClaim.items as any)?.name ?? "your claimed item";
 
-          await resend.emails.send({
-            from:
-              process.env.RESEND_FROM_EMAIL ||
-              "JaguarTrack <noreply@jaguartrack.com>",
-            to: claimantEmail,
-            subject: `Your claim for "${itemName}" has been ${normalizedStatus}`,
-            html: `
-              <h2>Jaguar Track Lost & Found</h2>
-              <p>Hi ${claimantProfile.full_name || "there"},</p>
-              <p>Your claim for <b>${itemName}</b> has been <b>${normalizedStatus}</b>.</p>
-              ${
-                normalizedStatus === "approved"
-                  ? "<p>🎉 You can now contact the admin to collect your item!</p>"
-                  : "<p>😞 Unfortunately, your claim was not approved.</p>"
-              }
-              <hr/>
-              <p>Thank you for using Jaguar Track Lost & Found.</p>
-            `,
-          });
-        } catch (mailErr: any) {
-          console.warn("⚠️ Failed to send email via Resend:", mailErr.message);
-        }
-      }
+      await resend.emails.send({
+        from: process.env.RESEND_FROM_EMAIL || "jaguartrack@yourdomain.com",
+        to: claimantEmail,
+        subject: `Your claim for "${itemName}" has been ${normalizedStatus}`,
+        html: `
+          <p>Hi ${claimantProfile.full_name || "there"},</p>
+          <p>Your claim for <b>${itemName}</b> has been <b>${normalizedStatus}</b>.</p>
+          <p>If you have any questions, please contact UB Lost & Found.</p>
+          <br/>
+          <p>– Jaguar Track Lost & Found Team</p>
+        `,
+      });
+    } catch (emailErr) {
+      console.error("❌ Email send error:", emailErr);
     }
-
-    return NextResponse.json({
-      success: true,
-      message: `Claim ${normalizedStatus} successfully! Email sent if applicable.`,
-    });
-  } catch (err: any) {
-    console.error("🔥 PATCH /claims error:", err.message);
-    return NextResponse.json(
-      { success: false, error: err.message || "Internal server error" },
-      { status: 500 }
-    );
   }
+}
+
+// ✅ Final response after everything runs
+return NextResponse.json({
+  success: true,
+  message: `Claim ${normalizedStatus} successfully!`,
+});
+} catch (err: any) {
+  console.error("🔥 PATCH /claims error:", err.message);
+  return NextResponse.json(
+    { success: false, error: err.message || "Internal server error" },
+    { status: 500 }
+  );
+}
 }
