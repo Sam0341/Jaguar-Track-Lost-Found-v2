@@ -210,10 +210,15 @@ export async function PATCH(req: Request) {
       .eq("id", claim_id)
       .single();
 
-    if (fullClaim?.profiles?.email && process.env.RESEND_API_KEY) {
+    // 🔧 Fix: profiles can be an array
+    const claimantProfile = Array.isArray(fullClaim?.profiles)
+      ? fullClaim.profiles[0]
+      : fullClaim.profiles;
+
+    if (claimantProfile?.email && process.env.RESEND_API_KEY) {
       try {
         const resend = new Resend(process.env.RESEND_API_KEY!);
-        const claimantEmail = fullClaim.profiles.email;
+        const claimantEmail = claimantProfile.email;
         const itemName = fullClaim.items?.name || "your claimed item";
 
         await resend.emails.send({
@@ -224,7 +229,7 @@ export async function PATCH(req: Request) {
           subject: `Your claim for "${itemName}" has been ${normalizedStatus}`,
           html: `
             <h2>Jaguar Track Lost & Found</h2>
-            <p>Hi ${fullClaim.profiles.full_name || "there"},</p>
+            <p>Hi ${claimantProfile.full_name || "there"},</p>
             <p>Your claim for <b>${itemName}</b> has been <b>${normalizedStatus}</b>.</p>
             ${
               normalizedStatus === "approved"
