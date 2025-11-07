@@ -9,6 +9,7 @@ type ItemData = {
   campus: string;
   description: string;
   image?: string | null;
+  reporter_email?: string | null; // ✅ added
 };
 
 type ProfileData = {
@@ -77,7 +78,8 @@ export default function AdminClaimsPage() {
             name,
             campus,
             description,
-            image
+            image,
+            reporter_email
           ),
           profiles:fk_claims_claimed_by (
             id,
@@ -283,7 +285,8 @@ export default function AdminClaimsPage() {
               <p><strong>Description:</strong> {selectedClaim.items?.description ?? "—"}</p>
               <hr className="my-2 border-gray-600" />
               <p><strong>Claimant:</strong> {selectedClaim.profiles?.full_name ?? "—"}</p>
-              <p><strong>Email:</strong> {selectedClaim.profiles?.email ?? "—"}</p>
+              <p><strong>Claimant Email:</strong> {selectedClaim.profiles?.email ?? "—"}</p>
+              <p><strong>Reporter Email:</strong> {selectedClaim.items?.reporter_email ?? "—"}</p>
               <p><strong>Phone:</strong> {selectedClaim.profiles?.phone ?? "—"}</p>
               <p><strong>Message:</strong> {selectedClaim.message ?? "—"}</p>
               <p>
