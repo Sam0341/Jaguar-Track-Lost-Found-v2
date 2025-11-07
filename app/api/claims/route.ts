@@ -102,6 +102,8 @@ export async function POST(req: Request) {
           { status: 401 }
         );
       }
+
+      // Dummy token for TS consistency
       user = { ...data.user, access_token: "" };
     }
 
@@ -169,7 +171,6 @@ export async function PATCH(req: Request) {
 
     const normalizedStatus = String(status).toLowerCase();
 
-    // ✅ Update claim
     const { error: updateError } = await supabase
       .from("claims")
       .update({ status: normalizedStatus })
@@ -177,7 +178,7 @@ export async function PATCH(req: Request) {
 
     if (updateError) throw updateError;
 
-    // ✅ Update item status if approved
+    // ✅ Update item if approved
     if (normalizedStatus === "approved") {
       const { data: claimData } = await supabase
         .from("claims")
@@ -194,7 +195,7 @@ export async function PATCH(req: Request) {
     }
 
     /* ----------------------------------------------------------
-     * ✉️ Send Email Notification to the Claimant
+     * ✉️ Send Email Notification to Claimant
      * ---------------------------------------------------------- */
     const { data: fullClaim } = await supabase
       .from("claims")
@@ -210,8 +211,8 @@ export async function PATCH(req: Request) {
       .eq("id", claim_id)
       .single();
 
-    // ✅ Make sure fullClaim exists
-    if (fullClaim) {
+    // ✅ Safely check if claim & email exist
+    if (fullClaim && fullClaim.profiles) {
       const claimantProfile = Array.isArray(fullClaim.profiles)
         ? fullClaim.profiles[0]
         : fullClaim.profiles;
@@ -220,7 +221,11 @@ export async function PATCH(req: Request) {
         try {
           const resend = new Resend(process.env.RESEND_API_KEY!);
           const claimantEmail = claimantProfile.email;
-          const itemName = fullClaim.items?.name || "your claimed item";
+          const itemName =
+             Array.isArray(fullClaim.items)
+                ? (fullClaim.items[0] as any)?.name || "your claimed item"
+                : (fullClaim.items as any)?.name || "your claimed item";
+
 
           await resend.emails.send({
             from:
