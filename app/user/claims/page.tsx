@@ -7,9 +7,10 @@ import { supabase } from "@/lib/supabaseClient";
 type Item = {
   id: string;
   name: string;
-  campus: string;
-  description: string;
-  image?: string | null;
+  campus: string | null;
+  description: string | null;
+  image: string | null;
+  category?: string | null;
 };
 
 type Claim = {
@@ -61,7 +62,7 @@ export default function MyClaimsPage() {
         return;
       }
 
-      const { data: claimsData, error } = await supabase
+      const { data, error } = await supabase
         .from("claims")
         .select(
           `
@@ -85,7 +86,12 @@ export default function MyClaimsPage() {
       if (error) {
         console.error("Error loading claims:", error);
       } else {
-        setClaims(claimsData || []);
+        // ✅ Flatten "items" array safely
+        const formatted = (data || []).map((c: any) => ({
+          ...c,
+          items: Array.isArray(c.items) ? c.items[0] : c.items,
+        }));
+        setClaims(formatted);
       }
 
       setLoading(false);
@@ -96,13 +102,14 @@ export default function MyClaimsPage() {
 
   // 🔹 Load messages for selected claim
   useEffect(() => {
-    if (!selectedClaim?.id) return; // ✅ Avoid null reference
+    const claimId = selectedClaim?.id;
+    if (!claimId) return; // ✅ Avoid null reference
 
     async function loadMessages() {
       const { data, error } = await supabase
         .from("messages")
         .select(`*, profiles:sender_id(full_name, email)`)
-        .eq("claim_id", selectedClaim.id)
+        .eq("claim_id", claimId)
         .order("created_at", { ascending: true });
 
       if (!error && data) {
@@ -116,14 +123,14 @@ export default function MyClaimsPage() {
 
     // 🔁 Realtime updates
     const channel = supabase
-      .channel(`messages:claim=${selectedClaim.id}`)
+      .channel(`messages:claim=${claimId}`)
       .on(
         "postgres_changes",
         {
           event: "INSERT",
           schema: "public",
           table: "messages",
-          filter: `claim_id=eq.${selectedClaim.id}`,
+          filter: `claim_id=eq.${claimId}`,
         },
         (payload) => {
           setMessages((prev) => [...prev, payload.new as Message]);
