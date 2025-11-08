@@ -1,64 +1,185 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
+// 🔹 Reusable Chat Component
+function ClaimChat({
+  claimId,
+  onClose,
+}: {
+  claimId: string;
+  onClose: () => void;
+}) {
+  const [messages, setMessages] = useState<any[]>([]);
+  const [newMessage, setNewMessage] = useState("");
+  const [user, setUser] = useState<any>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+
+  // Auto-scroll when messages update
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  // Load messages + session
+  useEffect(() => {
+    async function loadChat() {
+      const { data: userData } = await supabase.auth.getUser();
+      setUser(userData?.user);
+
+      const { data, error } = await supabase
+        .from("messages")
+        .select(`*, profiles:sender_id(full_name,email)`)
+        .eq("claim_id", claimId)
+        .order("created_at", { ascending: true });
+
+      if (!error && data) setMessages(data);
+    }
+    loadChat();
+
+    // Realtime subscription
+    const channel = supabase
+      .channel(`messages:claim_${claimId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "messages",
+          filter: `claim_id=eq.${claimId}`,
+        },
+        (payload) => setMessages((prev) => [...prev, payload.new])
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [claimId]);
+
+  async function sendMessage(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newMessage.trim() || !user) return;
+
+    await supabase.from("messages").insert([
+      {
+        claim_id: claimId,
+        sender_id: user.id,
+        content: newMessage.trim(),
+        is_admin: user?.user_metadata?.role === "admin",
+      },
+    ]);
+    setNewMessage("");
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex justify-end">
+      <div className="w-full sm:w-[420px] h-full bg-gray-900 text-white flex flex-col shadow-2xl animate-slide-in">
+        <div className="flex justify-between items-center px-4 py-3 border-b border-gray-700">
+          <h2 className="font-bold text-ubGold text-lg">Claim Chat</h2>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-white text-lg"
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          {messages.map((msg) => {
+            const isUser = msg.sender_id === user?.id;
+            return (
+              <div
+                key={msg.id}
+                className={`flex ${isUser ? "justify-end" : "justify-start"}`}
+              >
+                <div
+                  className={`p-3 rounded-2xl max-w-[75%] ${
+                    isUser
+                      ? "bg-ubGold text-black"
+                      : "bg-gray-800 text-white border border-gray-700"
+                  }`}
+                >
+                  {!isUser && (
+                    <p className="text-xs text-gray-400 mb-1">
+                      {msg.profiles?.full_name || msg.profiles?.email}
+                    </p>
+                  )}
+                  <p>{msg.content}</p>
+                  <p className="text-[10px] mt-1 text-gray-400 text-right">
+                    {new Date(msg.created_at).toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </p>
+                </div>
+              </div>
+            );
+          })}
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* Input */}
+        <form
+          onSubmit={sendMessage}
+          className="p-3 border-t border-gray-700 flex items-center space-x-2 bg-gray-800"
+        >
+          <input
+            type="text"
+            value={newMessage}
+            onChange={(e) => setNewMessage(e.target.value)}
+            placeholder="Type a message..."
+            className="flex-1 px-3 py-2 rounded-lg bg-gray-700 border border-gray-600 text-white outline-none focus:ring-2 focus:ring-ubGold"
+          />
+          <button
+            type="submit"
+            className="px-4 py-2 bg-ubGold text-black font-semibold rounded-lg hover:bg-yellow-400 transition"
+          >
+            Send
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// 🔹 Main Admin Dashboard
 export default function AdminDashboard() {
   const [tab, setTab] = useState<"items" | "claims">("items");
   const [items, setItems] = useState<any[]>([]);
   const [claims, setClaims] = useState<any[]>([]);
-  const [selectedItem, setSelectedItem] = useState<any>(null);
   const [loadingItems, setLoadingItems] = useState(true);
   const [loadingClaims, setLoadingClaims] = useState(true);
-  const [actionLoading, setActionLoading] = useState(false);
-  const [adminEmail, setAdminEmail] = useState<string | null>(null);
+  const [selectedClaim, setSelectedClaim] = useState<string | null>(null);
 
-  // 🔑 Fetch current admin
-  useEffect(() => {
-    async function fetchAdmin() {
-      const { data, error } = await supabase.auth.getUser();
-      if (!error && data?.user) {
-        setAdminEmail(data.user.email ?? null);
-      }
-    }
-    fetchAdmin();
-  }, []);
-
-  // 🧩 Fetch Items directly from Supabase
   useEffect(() => {
     fetchItems();
+    fetchClaims();
   }, []);
 
   async function fetchItems() {
     setLoadingItems(true);
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from("items")
       .select("*")
       .order("reported_at", { ascending: false });
-    if (!error) setItems(data || []);
+    setItems(data || []);
     setLoadingItems(false);
   }
 
-  // 🧾 Fetch Claims via API route
-  useEffect(() => {
-    async function fetchClaims() {
-      try {
-        const res = await fetch("/api/claims");
-        if (!res.ok) throw new Error("Failed to fetch claims");
+  async function fetchClaims() {
+    setLoadingClaims(true);
+    const { data } = await supabase
+      .from("claims")
+      .select(
+        `id, message, status, created_at, items:item_id(name, campus), profiles:claimed_by(full_name,email)`
+      )
+      .order("created_at", { ascending: false });
+    setClaims(data || []);
+    setLoadingClaims(false);
+  }
 
-        const data = await res.json();
-        setClaims(data || []);
-      } catch (err) {
-        console.error("❌ Fetch error:", err);
-      } finally {
-        setLoadingClaims(false);
-      }
-    }
-
-    fetchClaims();
-  }, []);
-
-  // 📅 Format date
   const formatDate = (date: string) =>
     new Date(date).toLocaleDateString("en-BZ", {
       year: "numeric",
@@ -66,107 +187,11 @@ export default function AdminDashboard() {
       day: "numeric",
     });
 
-  // ⚙️ Handle Status Update
-  async function handleUpdateStatus(status: string) {
-    if (!selectedItem) return;
-    setActionLoading(true);
-
-    const { error: updateError } = await supabase
-      .from("items")
-      .update({ status })
-      .eq("id", selectedItem.id);
-
-    if (updateError) {
-      alert("Error updating status: " + updateError.message);
-      setActionLoading(false);
-      return;
-    }
-
-    // ✅ Auto-create a claim when marked as Claimed
-    if (status === "Claimed" && adminEmail) {
-      await handleAutoClaim(selectedItem.id);
-    }
-
-    alert(`Item marked as ${status}!`);
-    setSelectedItem({ ...selectedItem, status });
-    fetchItems();
-    setActionLoading(false);
-  }
-
-  // 🧠 Auto Claim creation
-  async function handleAutoClaim(itemId: string) {
-    try {
-      const { data: existingClaims, error: checkError } = await supabase
-        .from("claims")
-        .select("id")
-        .eq("item_id", itemId);
-
-      if (checkError) {
-        console.warn("Claim check error:", checkError);
-        return;
-      }
-
-      if (existingClaims && existingClaims.length > 0) {
-        console.log("Claim already exists for item:", itemId);
-        return;
-      }
-
-      const { data: adminUser } = await supabase.auth.getUser();
-      const adminId = adminUser?.user?.id || null;
-
-      const { error: insertError } = await supabase.from("claims").insert([
-        {
-          item_id: itemId,
-          message: "Automatically created by admin marking this item as claimed.",
-          status: "Approved",
-          claimed_by: adminId,
-        },
-      ]);
-
-      if (insertError) {
-        console.error("Error creating claim:", insertError);
-      } else {
-        console.log("✅ Auto claim created for item:", itemId);
-      }
-    } catch (err) {
-      console.error("Auto claim creation failed:", err);
-    }
-  }
-
-  // 🗑️ Handle Delete
-  async function handleDelete() {
-    if (!selectedItem) return;
-    if (!confirm("Are you sure you want to delete this report?")) return;
-
-    setActionLoading(true);
-    const { error } = await supabase
-      .from("items")
-      .delete()
-      .eq("id", selectedItem.id);
-
-    if (error) alert("Error deleting item: " + error.message);
-    else {
-      alert("Item deleted successfully!");
-      setSelectedItem(null);
-      fetchItems();
-    }
-    setActionLoading(false);
-  }
-
-  // ⌨️ Close modal with Escape key
-  useEffect(() => {
-    const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setSelectedItem(null);
-    };
-    window.addEventListener("keydown", handleEsc);
-    return () => window.removeEventListener("keydown", handleEsc);
-  }, []);
-
   return (
-    <div className="p-6 max-w-7xl mx-auto">
+    <div className="p-6 max-w-7xl mx-auto relative">
       <h1 className="text-3xl font-bold text-ubGold mb-6">Admin Dashboard</h1>
 
-      {/* 🧭 Tabs */}
+      {/* Tabs */}
       <div className="flex gap-3 mb-8">
         <button
           onClick={() => setTab("items")}
@@ -190,13 +215,8 @@ export default function AdminDashboard() {
         </button>
       </div>
 
-      {/* 🧱 Tab Content */}
       {tab === "items" ? (
         <section>
-          <h2 className="text-2xl font-semibold mb-4 text-gray-800 dark:text-gray-100">
-            Reported Items ({items.length})
-          </h2>
-
           {loadingItems ? (
             <p className="text-gray-500">Loading reported items...</p>
           ) : items.length === 0 ? (
@@ -217,13 +237,12 @@ export default function AdminDashboard() {
                   {items.map((item) => (
                     <tr
                       key={item.id}
-                      onClick={() => setSelectedItem(item)}
-                      className="cursor-pointer border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 transition"
+                      className="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700"
                     >
-                      <td className="px-4 py-3 font-medium">{item.name}</td>
+                      <td className="px-4 py-3">{item.name}</td>
                       <td className="px-4 py-3">{item.status}</td>
                       <td className="px-4 py-3">{item.campus}</td>
-                      <td className="px-4 py-3">{item.reporter_name || "N/A"}</td>
+                      <td className="px-4 py-3">{item.reporter_name}</td>
                       <td className="px-4 py-3">
                         {item.reported_at ? formatDate(item.reported_at) : "—"}
                       </td>
@@ -236,10 +255,6 @@ export default function AdminDashboard() {
         </section>
       ) : (
         <section>
-          <h2 className="text-2xl font-semibold mb-4 text-gray-800 dark:text-gray-100">
-            Claims Management ({claims.length})
-          </h2>
-
           {loadingClaims ? (
             <p className="text-gray-500">Loading claims...</p>
           ) : claims.length === 0 ? (
@@ -254,7 +269,8 @@ export default function AdminDashboard() {
                     <th className="px-4 py-3">Claimed By</th>
                     <th className="px-4 py-3">Message</th>
                     <th className="px-4 py-3">Status</th>
-                    <th className="px-4 py-3">Created</th>
+                    <th className="px-4 py-3">Date</th>
+                    <th className="px-4 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -263,17 +279,21 @@ export default function AdminDashboard() {
                       key={claim.id}
                       className="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700"
                     >
-                      <td className="px-4 py-3 font-medium">
-                        {claim.items?.name || "N/A"}
-                      </td>
+                      <td className="px-4 py-3">{claim.items?.name || "N/A"}</td>
                       <td className="px-4 py-3">{claim.items?.campus || "—"}</td>
                       <td className="px-4 py-3">
-                        {claim.claimed_by?.email || "Unknown"}
+                        {claim.profiles?.email || "Unknown"}
                       </td>
                       <td className="px-4 py-3">{claim.message || "—"}</td>
-                      <td className="px-4 py-3 font-semibold">{claim.status}</td>
-                      <td className="px-4 py-3">
-                        {formatDate(claim.created_at)}
+                      <td className="px-4 py-3">{claim.status}</td>
+                      <td className="px-4 py-3">{formatDate(claim.created_at)}</td>
+                      <td className="px-4 py-3 text-right">
+                        <button
+                          onClick={() => setSelectedClaim(claim.id)}
+                          className="px-3 py-1 rounded-md bg-blue-600 text-white hover:bg-blue-700"
+                        >
+                          💬 Chat
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -284,102 +304,9 @@ export default function AdminDashboard() {
         </section>
       )}
 
-      {/* 🪟 Report Detail Modal */}
-      {selectedItem && (
-        <div
-          className="fixed inset-0 flex items-center justify-center bg-black/60 z-50"
-          onClick={() => setSelectedItem(null)}
-        >
-          <div
-            className="bg-white dark:bg-gray-900 rounded-xl shadow-lg p-6 w-full max-w-lg relative"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* ✖ Close button */}
-            <button
-              onClick={() => setSelectedItem(null)}
-              className="absolute top-2 right-3 text-gray-500 hover:text-gray-800 dark:hover:text-gray-300 text-lg"
-            >
-              ✕
-            </button>
-
-            <h3 className="text-2xl font-bold mb-4 text-gray-800 dark:text-gray-100">
-              Report Details
-            </h3>
-
-            <div className="space-y-2 text-gray-700 dark:text-gray-300">
-              <p>
-                <strong>Item Name:</strong> {selectedItem.name}
-              </p>
-              <p>
-                <strong>Status:</strong> {selectedItem.status}
-              </p>
-              <p>
-                <strong>Category:</strong> {selectedItem.category || "—"}
-              </p>
-              <p>
-                <strong>Campus:</strong> {selectedItem.campus}
-              </p>
-              <p>
-                <strong>Location:</strong> {selectedItem.location || "—"}
-              </p>
-              <p>
-                <strong>Reporter Name:</strong>{" "}
-                {selectedItem.reporter_name || "—"}
-              </p>
-              <p>
-                <strong>Reporter Email:</strong>{" "}
-                {selectedItem.reporter_email || "—"}
-              </p>
-              <p>
-                <strong>Description:</strong>{" "}
-                {selectedItem.description || "—"}
-              </p>
-              <p>
-                <strong>Reported On:</strong>{" "}
-                {selectedItem.reported_at
-                  ? new Date(selectedItem.reported_at).toLocaleString("en-BZ")
-                  : "—"}
-              </p>
-            </div>
-
-            {/* 🧭 Action Buttons */}
-            <div className="mt-6 flex flex-wrap gap-3 justify-between">
-              <button
-                onClick={() => handleUpdateStatus("Claimed")}
-                disabled={actionLoading}
-                className="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 transition disabled:opacity-50"
-              >
-                Mark as Claimed
-              </button>
-
-              <button
-                onClick={() => handleUpdateStatus("Found")}
-                disabled={actionLoading}
-                className="bg-yellow-500 text-white px-4 py-2 rounded-md hover:bg-yellow-600 transition disabled:opacity-50"
-              >
-                Mark as Found
-              </button>
-
-              <button
-                onClick={handleDelete}
-                disabled={actionLoading}
-                className="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700 transition disabled:opacity-50"
-              >
-                Delete
-              </button>
-            </div>
-
-            {/* 🟦 Bottom Close Button */}
-            <div className="mt-6 text-right">
-              <button
-                onClick={() => setSelectedItem(null)}
-                className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
+      {/* 🪟 Chat Drawer */}
+      {selectedClaim && (
+        <ClaimChat claimId={selectedClaim} onClose={() => setSelectedClaim(null)} />
       )}
     </div>
   );
