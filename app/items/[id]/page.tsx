@@ -14,6 +14,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
   const [claimMessage, setClaimMessage] = useState("");
   const [feedback, setFeedback] = useState("");
   const [claimStatus, setClaimStatus] = useState<string | null>(null);
+  const [claimId, setClaimId] = useState<string | null>(null); // 🆕 Added to store claim ID
   const router = useRouter();
 
   // 🧠 Fetch item + user + claim status
@@ -31,14 +32,17 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
 
       // 🔍 Check if this user already made a claim for this item
       if (currentUser) {
-        const { data: existingClaims, error } = await supabase
+        const { data: existingClaim, error } = await supabase
           .from("claims")
-          .select("status")
+          .select("id, status")
           .eq("item_id", params.id)
           .eq("claimed_by", currentUser.id)
           .maybeSingle();
 
-        if (!error && existingClaims) setClaimStatus(existingClaims.status);
+        if (!error && existingClaim) {
+          setClaimStatus(existingClaim.status);
+          setClaimId(existingClaim.id); // 🆕 Save claim ID
+        }
       }
     }
 
@@ -64,7 +68,6 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
     setFeedback("Submitting your claim...");
 
     try {
-      // ✅ Get Supabase session and access token
       const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
       if (sessionError || !sessionData.session) {
         setFeedback("❌ No valid session found. Please log in again.");
@@ -73,7 +76,6 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
 
       const token = sessionData.session.access_token;
 
-      // ✅ Send claim request with auth header
       const res = await fetch("/api/claims", {
         method: "POST",
         headers: {
@@ -92,6 +94,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
         setFeedback("✅ Claim submitted successfully! Awaiting admin approval.");
         setClaimStatus("Pending");
         setShowClaimForm(false);
+        if (data.claim_id) setClaimId(data.claim_id); // 🆕 If backend returns ID, save it
       } else {
         setFeedback(`❌ ${data.error || "Failed to submit claim."}`);
       }
@@ -110,7 +113,6 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
       : `${SUPABASE_URL}/${item.image}`
     : "https://placehold.co/600x400?text=No+Image+Available";
 
-  // ⏰ Format timestamp
   const formatDateTime = (timestamp: string) =>
     new Date(timestamp).toLocaleString("en-US", {
       weekday: "short",
@@ -122,7 +124,6 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
       hour12: true,
     });
 
-  // ⏳ Loading state
   if (!item)
     return (
       <div className="flex items-center justify-center h-64 text-gray-500 dark:text-gray-400">
@@ -249,6 +250,18 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
             >
               {feedback}
             </p>
+          )}
+
+          {/* 💬 Chat Button (NEW) */}
+          {claimId && (
+            <div className="mt-5 flex justify-center">
+              <Link
+                href={`/user/chat/${claimId}`}
+                className="px-4 py-2 bg-ubGold text-black font-semibold rounded-lg hover:bg-yellow-400 transition"
+              >
+                💬 Chat with Admin
+              </Link>
+            </div>
           )}
 
           {/* 🔙 Back Button */}
