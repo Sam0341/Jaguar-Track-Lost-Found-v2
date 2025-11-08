@@ -14,10 +14,12 @@ function NavLink({
   href,
   children,
   onClick,
+  badgeCount = 0,
 }: {
   href: string;
   children: React.ReactNode;
   onClick?: () => void;
+  badgeCount?: number;
 }) {
   const pathname = usePathname();
   const isActive = href === "/" ? pathname === href : pathname.startsWith(href);
@@ -26,13 +28,18 @@ function NavLink({
     <Link
       href={href}
       onClick={onClick}
-      className={`block px-3 py-2 text-base md:text-lg transition ${
+      className={`relative block px-3 py-2 text-base md:text-lg transition ${
         isActive
           ? "text-blue-600 dark:text-ubGold font-semibold"
           : "text-gray-700 dark:text-gray-200 hover:text-blue-500 dark:hover:text-ubGold"
       }`}
     >
       {children}
+      {badgeCount > 0 && (
+        <span className="absolute -top-1 -right-1 bg-red-600 text-white text-xs font-bold px-1.5 py-0.5 rounded-full">
+          {badgeCount > 9 ? "9+" : badgeCount}
+        </span>
+      )}
     </Link>
   );
 }
@@ -45,6 +52,7 @@ export default function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [toast, setToast] = useState("");
   const [role, setRole] = useState<string | null>(null);
+  const [unreadCount, setUnreadCount] = useState<number>(0);
 
   // 🧠 Determine role from Supabase profiles
   useEffect(() => {
@@ -53,7 +61,7 @@ export default function Navbar() {
       const authUser = authData?.user;
 
       if (authUser?.email) {
-        // Try to load role from profiles
+        // Load role from profiles
         const { data: profile } = await supabase
           .from("profiles")
           .select("role")
@@ -75,6 +83,52 @@ export default function Navbar() {
 
     fetchUserRole();
   }, []);
+
+  // 🧾 Fetch unread messages for user claims
+  useEffect(() => {
+    async function fetchUnreadMessages() {
+      if (!user) return;
+
+      const { data: claims } = await supabase
+        .from("claims")
+        .select("id")
+        .eq("claimed_by", user.id);
+
+      if (!claims || claims.length === 0) {
+        setUnreadCount(0);
+        return;
+      }
+
+      const claimIds = claims.map((c) => c.id);
+      const { count } = await supabase
+        .from("messages")
+        .select("*", { count: "exact", head: true })
+        .in("claim_id", claimIds)
+        .eq("is_admin", true); // Messages from admin
+
+      setUnreadCount(count || 0);
+    }
+
+    fetchUnreadMessages();
+
+    // Realtime updates
+    const channel = supabase
+      .channel("messages_changes")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "messages" },
+        (payload) => {
+          if (payload.new.is_admin) {
+            setUnreadCount((prev) => prev + 1);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user]);
 
   // 🪟 Detect scrolling for shadow effect
   useEffect(() => {
@@ -104,7 +158,6 @@ export default function Navbar() {
     }
   };
 
-  // 🧩 Determine user state
   const userEmail = user?.email || "User";
   const userName = userEmail.split("@")[0];
   const isAdmin = role === "admin" || isManualAdmin;
@@ -141,6 +194,9 @@ export default function Navbar() {
             <>
               <NavLink href="/items">Items</NavLink>
               <NavLink href="/report">Report</NavLink>
+              <NavLink href="/user/claims" badgeCount={unreadCount}>
+                My Claims
+              </NavLink>
             </>
           )}
 
@@ -222,7 +278,6 @@ export default function Navbar() {
                   Home
                 </NavLink>
 
-                {/* Regular User Links */}
                 {!isAdmin && user && (
                   <>
                     <NavLink href="/items" onClick={() => setMenuOpen(false)}>
@@ -231,10 +286,16 @@ export default function Navbar() {
                     <NavLink href="/report" onClick={() => setMenuOpen(false)}>
                       Report
                     </NavLink>
+                    <NavLink
+                      href="/user/claims"
+                      onClick={() => setMenuOpen(false)}
+                      badgeCount={unreadCount}
+                    >
+                      My Claims
+                    </NavLink>
                   </>
                 )}
 
-                {/* Admin Links */}
                 {isAdmin && (
                   <>
                     <NavLink href="/reports" onClick={() => setMenuOpen(false)}>
