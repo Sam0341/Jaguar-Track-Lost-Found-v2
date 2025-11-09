@@ -5,6 +5,9 @@ import { SupabaseProvider } from "@/components/SupabaseProvider";
 export const metadata = {
   title: "Jaguar Track Lost & Found",
   description: "University of Belize Lost & Found Management System",
+  icons: {
+    icon: "/logo.png", // ✅ your logo file inside /public
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
