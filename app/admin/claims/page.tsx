@@ -14,8 +14,8 @@ type ItemData = {
 
 type ProfileData = {
   id: string;
-  full_name: string;
-  email: string;
+  full_name: string | null;
+  email: string | null;
   phone?: string | null;
 };
 
@@ -54,19 +54,12 @@ export default function AdminClaimsPage() {
     fetchClaims();
   }, []);
 
-  const shouldSendDevHeader = () =>
-    typeof window !== "undefined" &&
-    window.location.hostname.includes("localhost");
-
   // 🧠 Fetch all claims joined with items + profiles
   async function fetchClaims() {
     setLoading(true);
     setErrorMsg(null);
 
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token;
-
       const { data, error } = await supabase
         .from("claims")
         .select(`
@@ -128,19 +121,34 @@ export default function AdminClaimsPage() {
     }
   }
 
-  // ✉️ Send message (admin)
+  // ✉️ Send message (Admin)
   async function sendMessage(e: React.FormEvent) {
     e.preventDefault();
     if (!selectedClaim || !newMessage.trim()) return;
 
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError || !user) {
+      console.error("No logged-in admin found.");
+      return;
+    }
+
     const { error } = await supabase.from("messages").insert([
       {
         claim_id: selectedClaim.id,
-        sender_id: "admin",
+        sender_id: user.id, // ✅ real admin ID
         content: newMessage.trim(),
       },
     ]);
-    if (!error) setNewMessage("");
+
+    if (error) {
+      console.error("Send message error:", error);
+    } else {
+      setNewMessage("");
+    }
   }
 
   // 💬 Load messages for selected claim
@@ -218,6 +226,7 @@ export default function AdminClaimsPage() {
                 <th className="px-5 py-3 font-semibold">Item</th>
                 <th className="px-5 py-3 font-semibold">Campus</th>
                 <th className="px-5 py-3 font-semibold">Claimant</th>
+                <th className="px-5 py-3 font-semibold">Claim Message</th>
                 <th className="px-5 py-3 font-semibold">Status</th>
                 <th className="px-5 py-3 font-semibold">Actions</th>
               </tr>
@@ -232,7 +241,12 @@ export default function AdminClaimsPage() {
                     {c.items?.name ?? "—"}
                   </td>
                   <td className="px-5 py-3 text-gray-400">{c.items?.campus ?? "—"}</td>
-                  <td className="px-5 py-3">{c.profiles?.full_name ?? "—"}</td>
+                  <td className="px-5 py-3">
+                    {c.profiles?.full_name || c.profiles?.email || "—"}
+                  </td>
+                  <td className="px-5 py-3 text-gray-300 max-w-xs truncate">
+                    {c.message || "—"}
+                  </td>
                   <td className="px-5 py-3">
                     <span
                       className={`px-3 py-1 rounded-full text-xs font-semibold ${
@@ -280,9 +294,16 @@ export default function AdminClaimsPage() {
                 {selectedClaim.items?.name}
               </h2>
               <p className="text-xs text-gray-400">
-                {selectedClaim.profiles?.full_name} •{" "}
-                {selectedClaim.items?.campus}
+                {selectedClaim.profiles?.full_name ||
+                  selectedClaim.profiles?.email ||
+                  "User"}{" "}
+                • {selectedClaim.items?.campus}
               </p>
+              {selectedClaim.message && (
+                <p className="text-sm text-gray-300 mt-2 italic">
+                  “{selectedClaim.message}”
+                </p>
+              )}
             </div>
             <button
               onClick={() => setSelectedClaim(null)}
@@ -294,7 +315,7 @@ export default function AdminClaimsPage() {
 
           <div className="p-4 h-[65vh] overflow-y-auto space-y-3">
             {messages.map((msg) => {
-              const isAdmin = msg.sender_id === "admin";
+              const isAdmin = msg.profiles?.email?.includes("@ub.edu.bz") === false;
               return (
                 <div
                   key={msg.id}
@@ -309,7 +330,9 @@ export default function AdminClaimsPage() {
                   >
                     {!isAdmin && (
                       <p className="text-xs text-gray-400 mb-1">
-                        {msg.profiles?.full_name || "User"}
+                        {msg.profiles?.full_name
+                          ? msg.profiles.full_name
+                          : msg.profiles?.email || "Unknown User"}
                       </p>
                     )}
                     <p>{msg.content}</p>
