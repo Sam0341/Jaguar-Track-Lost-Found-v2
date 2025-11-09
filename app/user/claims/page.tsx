@@ -86,11 +86,27 @@ export default function MyClaimsPage() {
       if (error) {
         console.error("Error loading claims:", error);
       } else {
-        // ✅ Flatten "items" array safely
-        const formatted = (data || []).map((c: any) => ({
-          ...c,
-          items: Array.isArray(c.items) ? c.items[0] : c.items,
-        }));
+        // ✅ Flatten items and attach public image URLs
+        const formatted = (data || []).map((c: any) => {
+          const item = Array.isArray(c.items) ? c.items[0] : c.items;
+
+          // 🖼️ Convert storage path to public URL
+          let imageUrl = null;
+          if (item?.image) {
+            const { data: publicData } = supabase.storage
+              .from("item-images") // 🔸 your bucket name here
+              .getPublicUrl(item.image);
+            imageUrl = publicData?.publicUrl || null;
+          }
+
+          return {
+            ...c,
+            items: {
+              ...item,
+              image: imageUrl,
+            },
+          };
+        });
         setClaims(formatted);
       }
 
@@ -103,7 +119,7 @@ export default function MyClaimsPage() {
   // 🔹 Load messages for selected claim
   useEffect(() => {
     const claimId = selectedClaim?.id;
-    if (!claimId) return; // ✅ Avoid null reference
+    if (!claimId) return;
 
     async function loadMessages() {
       const { data, error } = await supabase
@@ -207,6 +223,10 @@ export default function MyClaimsPage() {
                   }
                   alt={claim.items?.name || "Item"}
                   className="w-full h-40 object-cover rounded-lg mb-3"
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).src =
+                      "https://placehold.co/400x300?text=No+Image";
+                  }}
                 />
                 <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-100">
                   {claim.items?.name}
