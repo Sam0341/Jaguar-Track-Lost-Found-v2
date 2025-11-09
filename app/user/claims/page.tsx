@@ -42,6 +42,7 @@ export default function MyClaimsPage() {
   const [newMessage, setNewMessage] = useState("");
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [zoomImage, setZoomImage] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // 🔹 Auto-scroll when messages update
@@ -216,18 +217,27 @@ export default function MyClaimsPage() {
                 className="p-5 bg-white dark:bg-gray-900 rounded-xl border border-gray-300 dark:border-gray-700 shadow hover:shadow-lg transition cursor-pointer"
                 onClick={() => setSelectedClaim(claim)}
               >
-                <img
-                  src={
-                    claim.items?.image ||
-                    "https://placehold.co/400x300?text=No+Image"
-                  }
-                  alt={claim.items?.name || "Item"}
-                  className="w-full h-40 object-cover rounded-lg mb-3"
-                  onError={(e) => {
-                    (e.currentTarget as HTMLImageElement).src =
-                      "https://placehold.co/400x300?text=No+Image";
+                <div
+                  className="relative"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (claim.items?.image) setZoomImage(claim.items.image);
                   }}
-                />
+                >
+                  <img
+                    src={
+                      claim.items?.image ||
+                      "https://placehold.co/400x300?text=No+Image"
+                    }
+                    alt={claim.items?.name || "Item"}
+                    className="w-full h-40 object-cover rounded-lg mb-3 hover:opacity-90 transition"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).src =
+                        "https://placehold.co/400x300?text=No+Image";
+                    }}
+                  />
+                </div>
+
                 <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-100">
                   {claim.items?.name}
                 </h3>
@@ -331,6 +341,20 @@ export default function MyClaimsPage() {
               Send
             </button>
           </form>
+        </div>
+      )}
+
+      {/* 🔍 Zoomed Image Popup */}
+      {zoomImage && (
+        <div
+          onClick={() => setZoomImage(null)}
+          className="fixed inset-0 bg-black/90 z-[9999] flex justify-center items-center cursor-zoom-out transition"
+        >
+          <img
+            src={zoomImage}
+            alt="Zoomed"
+            className="max-h-[90vh] max-w-[90vw] object-contain rounded-lg shadow-lg"
+          />
         </div>
       )}
     </div>
