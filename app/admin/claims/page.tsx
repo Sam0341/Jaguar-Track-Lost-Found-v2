@@ -139,16 +139,13 @@ export default function AdminClaimsPage() {
     const { error } = await supabase.from("messages").insert([
       {
         claim_id: selectedClaim.id,
-        sender_id: user.id, // ✅ real admin ID
+        sender_id: user.id,
         content: newMessage.trim(),
       },
     ]);
 
-    if (error) {
-      console.error("Send message error:", error);
-    } else {
-      setNewMessage("");
-    }
+    if (error) console.error("Send message error:", error);
+    else setNewMessage("");
   }
 
   // 💬 Load messages for selected claim
@@ -196,6 +193,11 @@ export default function AdminClaimsPage() {
     setTimeout(() => setShowToast(false), 4000);
   }
 
+  // 🪄 Auto-scroll to latest message
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
   if (loading)
     return <div className="text-center py-16 text-gray-400">Loading claims...</div>;
 
@@ -242,7 +244,7 @@ export default function AdminClaimsPage() {
                   </td>
                   <td className="px-5 py-3 text-gray-400">{c.items?.campus ?? "—"}</td>
                   <td className="px-5 py-3">
-                    {c.profiles?.full_name || c.profiles?.email || "—"}
+                    {c.profiles?.email || c.profiles?.full_name || "—"}
                   </td>
                   <td className="px-5 py-3 text-gray-300 max-w-xs truncate">
                     {c.message || "—"}
@@ -290,14 +292,10 @@ export default function AdminClaimsPage() {
         <div className="max-w-3xl mx-auto bg-gray-900 text-white rounded-xl shadow-lg overflow-hidden">
           <div className="bg-gray-800 px-5 py-3 flex justify-between items-center border-b border-gray-700">
             <div>
-              <h2 className="text-lg font-semibold">
-                {selectedClaim.items?.name}
-              </h2>
+              <h2 className="text-lg font-semibold">{selectedClaim.items?.name}</h2>
               <p className="text-xs text-gray-400">
-                {selectedClaim.profiles?.full_name ||
-                  selectedClaim.profiles?.email ||
-                  "User"}{" "}
-                • {selectedClaim.items?.campus}
+                {selectedClaim.profiles?.email || "Unknown"} •{" "}
+                {selectedClaim.items?.campus}
               </p>
               {selectedClaim.message && (
                 <p className="text-sm text-gray-300 mt-2 italic">
@@ -313,35 +311,35 @@ export default function AdminClaimsPage() {
             </button>
           </div>
 
+          {/* Chat messages */}
           <div className="p-4 h-[65vh] overflow-y-auto space-y-3">
             {messages.map((msg) => {
-              const isAdmin = msg.profiles?.email?.includes("@ub.edu.bz") === false;
+              const isAdmin =
+                msg.profiles?.email && !msg.profiles.email.endsWith("@ub.edu.bz");
               return (
                 <div
                   key={msg.id}
                   className={`flex ${isAdmin ? "justify-end" : "justify-start"}`}
                 >
                   <div
-                    className={`p-3 rounded-2xl max-w-[75%] ${
+                    className={`p-3 rounded-2xl max-w-[75%] shadow-md ${
                       isAdmin
-                        ? "bg-ubGold text-black"
-                        : "bg-gray-800 text-gray-100 border border-gray-700"
+                        ? "bg-ubGold text-black rounded-br-none"
+                        : "bg-gray-800 text-gray-100 border border-gray-700 rounded-bl-none"
                     }`}
                   >
-                    {!isAdmin && (
-                      <p className="text-xs text-gray-400 mb-1">
-                        {msg.profiles?.full_name
-                          ? msg.profiles.full_name
-                          : msg.profiles?.email || "Unknown User"}
-                      </p>
-                    )}
-                    <p>{msg.content}</p>
-                    <p className="text-[10px] mt-1 text-gray-400 text-right">
-                      {new Date(msg.created_at).toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </p>
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="text-xs font-medium text-gray-400">
+                        {isAdmin ? "Admin" : msg.profiles?.email || "User"}
+                      </span>
+                      <span className="text-[10px] text-gray-400">
+                        {new Date(msg.created_at).toLocaleTimeString([], {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </span>
+                    </div>
+                    <p className="text-sm">{msg.content}</p>
                   </div>
                 </div>
               );
