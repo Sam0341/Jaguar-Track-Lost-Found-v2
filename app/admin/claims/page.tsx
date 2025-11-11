@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
-/* ----------------------------- Types ----------------------------- */
+/* ---------- Types (unchanged from your working version) ---------- */
 type ItemData = {
   id: string;
   name: string;
@@ -39,7 +39,7 @@ type Message = {
 };
 
 export default function AdminClaimsPage() {
-  /* --------------------------- Page state --------------------------- */
+  /* ---------- Core state ---------- */
   const [claims, setClaims] = useState<ClaimView[]>([]);
   const [selectedClaim, setSelectedClaim] = useState<ClaimView | null>(null);
 
@@ -47,10 +47,18 @@ export default function AdminClaimsPage() {
   const [newMessage, setNewMessage] = useState("");
 
   const [loading, setLoading] = useState(true);
-  const [toastMsg, setToastMsg] = useState<string | null>(null);
-  const [toastVisible, setToastVisible] = useState(false); // renamed from showToast to avoid clash
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+
+  /* ---------- Toast (renamed to avoid collisions) ---------- */
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [toastOpen, setToastOpen] = useState(false);
+
+  /* ---------- Phase 1 + 2 UI helpers ---------- */
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] =
+    useState<"all" | "pending" | "approved" | "rejected">("all");
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -112,10 +120,13 @@ export default function AdminClaimsPage() {
         .eq("id", claimId);
       if (error) throw error;
 
-      setClaims((prev) => prev.map((c) => (c.id === claimId ? { ...c, status } : c)));
-      triggerToast(`✅ Claim ${status.toUpperCase()} successfully!`);
+      setClaims((prev) =>
+        prev.map((c) => (c.id === claimId ? { ...c, status } : c))
+      );
+
+      openToast(`✅ Claim ${status.toUpperCase()} successfully!`);
     } catch (err: any) {
-      triggerToast("❌ " + err.message, "error");
+      openToast("❌ " + err.message);
     } finally {
       setActionLoading(null);
     }
@@ -181,18 +192,50 @@ export default function AdminClaimsPage() {
   }, [messages]);
 
   /* --------------------------- Toast helper --------------------------- */
-  function triggerToast(
-    msg: string,
-    type: "success" | "error" | "info" = "success"
-  ) {
+  function openToast(msg: string) {
     setToastMsg(msg);
-    setToastVisible(true);
-    setTimeout(() => setToastVisible(false), 3500);
+    setToastOpen(true);
+    setTimeout(() => setToastOpen(false), 3500);
   }
 
-  /* ----------------------------- Render ----------------------------- */
+  /* ------------------------ Derived / filtered ------------------------ */
+  const filteredClaims = useMemo(() => {
+    const term = search.trim().toLowerCase();
+
+    return claims.filter((c) => {
+      const statusOk =
+        statusFilter === "all" ||
+        (c.status?.toLowerCase?.() ?? "pending") === statusFilter;
+
+      const name = c.items?.name?.toLowerCase?.() || "";
+      const email = c.profiles?.email?.toLowerCase?.() || "";
+      const full = c.profiles?.full_name?.toLowerCase?.() || "";
+      const campus = c.items?.campus?.toLowerCase?.() || "";
+
+      const matches =
+        !term ||
+        name.includes(term) ||
+        email.includes(term) ||
+        full.includes(term) ||
+        campus.includes(term);
+
+      return statusOk && matches;
+    });
+  }, [claims, search, statusFilter]);
+
+  const stats = useMemo(() => {
+    const total = claims.length;
+    const pending = claims.filter((c) => (c.status ?? "pending") === "pending").length;
+    const approved = claims.filter((c) => c.status === "approved").length;
+    const rejected = claims.filter((c) => c.status === "rejected").length;
+    return { total, pending, approved, rejected };
+  }, [claims]);
+
+  /* ------------------------------- UI ------------------------------- */
   if (loading)
-    return <div className="text-center py-16 text-gray-400">Loading claims...</div>;
+    return (
+      <div className="text-center py-16 text-gray-400">Loading claims...</div>
+    );
 
   if (errorMsg)
     return (
@@ -205,14 +248,53 @@ export default function AdminClaimsPage() {
     <div className="p-6 max-w-7xl mx-auto relative">
       <h1 className="text-3xl font-bold text-ubGold mb-6">Claims Management</h1>
 
-      {/* 🔔 Toast */}
-      {toastVisible && toastMsg && (
-        <div className="fixed top-6 right-6 bg-green-600 text-white px-5 py-3 rounded-lg shadow-lg z-[9999]">
+      {/* Toast */}
+      {toastOpen && toastMsg && (
+        <div className="fixed top-6 right-6 bg-green-600 text-white px-5 py-3 rounded-lg shadow-lg z-50">
           {toastMsg}
         </div>
       )}
 
-      {/* 📋 Table View */}
+      {/* Phase 1/2: Controls + Quick stats */}
+      <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div className="flex items-center gap-2">
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by item, claimant, campus…"
+            className="w-72 px-3 py-2 rounded-md bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 outline-none focus:ring-2 focus:ring-ubGold"
+          />
+          <select
+            value={statusFilter}
+            onChange={(e) =>
+              setStatusFilter(e.target.value as "all" | "pending" | "approved" | "rejected")
+            }
+            className="px-3 py-2 rounded-md bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 outline-none focus:ring-2 focus:ring-ubGold"
+          >
+            <option value="all">All statuses</option>
+            <option value="pending">Pending</option>
+            <option value="approved">Approved</option>
+            <option value="rejected">Rejected</option>
+          </select>
+        </div>
+
+        <div className="flex flex-wrap gap-2 text-sm">
+          <span className="px-2 py-1 rounded bg-gray-200 dark:bg-gray-800">
+            Total: <b>{stats.total}</b>
+          </span>
+          <span className="px-2 py-1 rounded bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">
+            Pending: <b>{stats.pending}</b>
+          </span>
+          <span className="px-2 py-1 rounded bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+            Approved: <b>{stats.approved}</b>
+          </span>
+          <span className="px-2 py-1 rounded bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">
+            Rejected: <b>{stats.rejected}</b>
+          </span>
+        </div>
+      </div>
+
+      {/* Table vs Chat view */}
       {!selectedClaim ? (
         <div className="overflow-x-auto bg-white dark:bg-gray-800 rounded-xl shadow-md border border-gray-700">
           <table className="min-w-full text-sm">
@@ -227,25 +309,29 @@ export default function AdminClaimsPage() {
               </tr>
             </thead>
             <tbody>
-              {claims.map((c) => (
+              {filteredClaims.map((c) => (
                 <tr
                   key={c.id}
-                  className="border-b dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer transition"
+                  className="border-b dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700 transition"
                 >
                   <td className="px-5 py-3 font-semibold text-ubGold">
                     {c.items?.name ?? "—"}
                   </td>
-                  <td className="px-5 py-3 text-gray-400">{c.items?.campus ?? "—"}</td>
-                  <td className="px-5 py-3">{c.profiles?.email || c.profiles?.full_name || "—"}</td>
-                  <td className="px-5 py-3 text-gray-300 max-w-xs truncate">
+                  <td className="px-5 py-3 text-gray-500 dark:text-gray-300">
+                    {c.items?.campus ?? "—"}
+                  </td>
+                  <td className="px-5 py-3">
+                    {c.profiles?.email || c.profiles?.full_name || "—"}
+                  </td>
+                  <td className="px-5 py-3 text-gray-400 max-w-xs truncate">
                     {c.message || "—"}
                   </td>
                   <td className="px-5 py-3">
                     <span
                       className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                        c.status === "approved"
+                        (c.status ?? "pending") === "approved"
                           ? "bg-green-600 text-white"
-                          : c.status === "rejected"
+                          : (c.status ?? "pending") === "rejected"
                           ? "bg-red-600 text-white"
                           : "bg-yellow-500 text-white"
                       }`}
@@ -277,20 +363,36 @@ export default function AdminClaimsPage() {
                   </td>
                 </tr>
               ))}
+
+              {filteredClaims.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={6}
+                    className="px-5 py-6 text-center text-gray-500 dark:text-gray-400"
+                  >
+                    No claims match your filters.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
       ) : (
-        // 💬 Chat View
+        // Chat view
         <div className="max-w-3xl mx-auto bg-gray-900 text-white rounded-xl shadow-lg overflow-hidden">
           <div className="bg-gray-800 px-5 py-3 flex justify-between items-center border-b border-gray-700">
             <div>
-              <h2 className="text-lg font-semibold">{selectedClaim.items?.name}</h2>
+              <h2 className="text-lg font-semibold">
+                {selectedClaim.items?.name}
+              </h2>
               <p className="text-xs text-gray-400">
-                {selectedClaim.profiles?.email || "Unknown"} • {selectedClaim.items?.campus}
+                {selectedClaim.profiles?.email || "Unknown"} •{" "}
+                {selectedClaim.items?.campus}
               </p>
               {selectedClaim.message && (
-                <p className="text-sm text-gray-300 mt-2 italic">“{selectedClaim.message}”</p>
+                <p className="text-sm text-gray-300 mt-2 italic">
+                  “{selectedClaim.message}”
+                </p>
               )}
             </div>
             <button
@@ -301,9 +403,9 @@ export default function AdminClaimsPage() {
             </button>
           </div>
 
-          {/* Chat messages */}
           <div className="p-4 h-[65vh] overflow-y-auto space-y-3">
             {messages.map((msg) => {
+              // Treat non-UB emails as Admin (your earlier logic)
               const isAdmin =
                 msg.profiles?.email && !msg.profiles.email.endsWith("@ub.edu.bz");
               return (
