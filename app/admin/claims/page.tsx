@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
-/* ---------- Types (unchanged from your working version) ---------- */
+/* ---------- Types ---------- */
 type ItemData = {
   id: string;
   name: string;
@@ -39,34 +39,22 @@ type Message = {
 };
 
 export default function AdminClaimsPage() {
-  /* ---------- Core state ---------- */
   const [claims, setClaims] = useState<ClaimView[]>([]);
   const [selectedClaim, setSelectedClaim] = useState<ClaimView | null>(null);
-
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState("");
-
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-
-  /* ---------- Toast (renamed to avoid collisions) ---------- */
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [toastOpen, setToastOpen] = useState(false);
-
-  /* ---------- Phase 1 + 2 UI helpers ---------- */
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] =
     useState<"all" | "pending" | "approved" | "rejected">("all");
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    fetchClaims();
-  }, []);
-
-  /* -------------------- Fetch claims (with joins) -------------------- */
+  /* -------------------- Fetch claims -------------------- */
   async function fetchClaims() {
     setLoading(true);
     setErrorMsg(null);
@@ -107,24 +95,35 @@ export default function AdminClaimsPage() {
     }
   }
 
-  /* -------------------------- Update status -------------------------- */
+  useEffect(() => {
+    fetchClaims();
+  }, []);
+
+  /* -------------------------- Update claim status -------------------------- */
   async function updateClaimStatus(
     claimId: string,
     status: "approved" | "rejected"
   ) {
     setActionLoading(claimId);
     try {
-      const { error } = await supabase
-        .from("claims")
-        .update({ status })
-        .eq("id", claimId);
-      if (error) throw error;
+      const res = await fetch("/api/claims", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ claim_id: claimId, status }),
+      });
 
-      setClaims((prev) =>
-        prev.map((c) => (c.id === claimId ? { ...c, status } : c))
-      );
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || "Update failed");
 
-      openToast(`✅ Claim ${status.toUpperCase()} successfully!`);
+      openToast(result.message || `✅ Claim ${status} successfully!`);
+
+      const approvedRow = document.getElementById(`claim-row-${claimId}`);
+      if (approvedRow) {
+        approvedRow.classList.add("animate-pulse-green");
+        setTimeout(() => approvedRow.classList.remove("animate-pulse-green"), 1500);
+      }
+
+      await fetchClaims();
     } catch (err: any) {
       openToast("❌ " + err.message);
     } finally {
@@ -147,7 +146,7 @@ export default function AdminClaimsPage() {
     const { error } = await supabase.from("messages").insert([
       {
         claim_id: selectedClaim.id,
-        sender_id: user.id, // real admin id
+        sender_id: user.id,
         content: newMessage.trim(),
       },
     ]);
@@ -155,7 +154,7 @@ export default function AdminClaimsPage() {
     if (!error) setNewMessage("");
   }
 
-  // Load messages when a claim is selected + realtime
+  /* ---------------- Load messages + realtime ---------------- */
   useEffect(() => {
     const claimId = selectedClaim?.id;
     if (!claimId) return;
@@ -176,7 +175,12 @@ export default function AdminClaimsPage() {
       .channel(`messages:claim=${claimId}`)
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "messages", filter: `claim_id=eq.${claimId}` },
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "messages",
+          filter: `claim_id=eq.${claimId}`,
+        },
         (payload) => setMessages((prev) => [...prev, payload.new as Message])
       )
       .subscribe();
@@ -186,22 +190,20 @@ export default function AdminClaimsPage() {
     };
   }, [selectedClaim]);
 
-  // autoscroll
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  /* --------------------------- Toast helper --------------------------- */
+  /* --------------------------- Toast --------------------------- */
   function openToast(msg: string) {
     setToastMsg(msg);
     setToastOpen(true);
     setTimeout(() => setToastOpen(false), 3500);
   }
 
-  /* ------------------------ Derived / filtered ------------------------ */
+  /* ------------------------ Filters ------------------------ */
   const filteredClaims = useMemo(() => {
     const term = search.trim().toLowerCase();
-
     return claims.filter((c) => {
       const statusOk =
         statusFilter === "all" ||
@@ -233,9 +235,7 @@ export default function AdminClaimsPage() {
 
   /* ------------------------------- UI ------------------------------- */
   if (loading)
-    return (
-      <div className="text-center py-16 text-gray-400">Loading claims...</div>
-    );
+    return <div className="text-center py-16 text-gray-400">Loading claims...</div>;
 
   if (errorMsg)
     return (
@@ -255,9 +255,9 @@ export default function AdminClaimsPage() {
         </div>
       )}
 
-      {/* Phase 1/2: Controls + Quick stats */}
+      {/* Filters + Stats */}
       <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -294,7 +294,7 @@ export default function AdminClaimsPage() {
         </div>
       </div>
 
-      {/* Table vs Chat view */}
+      {/* Table or Chat */}
       {!selectedClaim ? (
         <div className="overflow-x-auto bg-white dark:bg-gray-800 rounded-xl shadow-md border border-gray-700">
           <table className="min-w-full text-sm">
@@ -303,14 +303,15 @@ export default function AdminClaimsPage() {
                 <th className="px-5 py-3 font-semibold">Item</th>
                 <th className="px-5 py-3 font-semibold">Campus</th>
                 <th className="px-5 py-3 font-semibold">Claimant</th>
-                <th className="px-5 py-3 font-semibold">Claim Message</th>
+                <th className="px-5 py-3 font-semibold">Message</th>
                 <th className="px-5 py-3 font-semibold">Status</th>
-                <th className="px-5 py-3 font-semibold">Actions</th>
+                <th className="px-5 py-3 font-semibold text-center">Actions</th>
               </tr>
             </thead>
             <tbody>
               {filteredClaims.map((c) => (
                 <tr
+                  id={`claim-row-${c.id}`}
                   key={c.id}
                   className="border-b dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700 transition"
                 >
@@ -339,7 +340,7 @@ export default function AdminClaimsPage() {
                       {c.status ?? "pending"}
                     </span>
                   </td>
-                  <td className="px-5 py-3 space-x-2">
+                  <td className="px-5 py-3 flex flex-wrap justify-center gap-2">
                     <button
                       onClick={() => setSelectedClaim(c)}
                       className="px-3 py-1 bg-blue-600 text-white rounded-md"
@@ -363,7 +364,6 @@ export default function AdminClaimsPage() {
                   </td>
                 </tr>
               ))}
-
               {filteredClaims.length === 0 && (
                 <tr>
                   <td
@@ -378,7 +378,7 @@ export default function AdminClaimsPage() {
           </table>
         </div>
       ) : (
-        // Chat view
+        /* Chat View */
         <div className="max-w-3xl mx-auto bg-gray-900 text-white rounded-xl shadow-lg overflow-hidden">
           <div className="bg-gray-800 px-5 py-3 flex justify-between items-center border-b border-gray-700">
             <div>
@@ -405,7 +405,6 @@ export default function AdminClaimsPage() {
 
           <div className="p-4 h-[65vh] overflow-y-auto space-y-3">
             {messages.map((msg) => {
-              // Treat non-UB emails as Admin (your earlier logic)
               const isAdmin =
                 msg.profiles?.email && !msg.profiles.email.endsWith("@ub.edu.bz");
               return (
@@ -461,4 +460,20 @@ export default function AdminClaimsPage() {
       )}
     </div>
   );
+}
+
+/* ✅ Add the green pulse animation */
+if (typeof document !== "undefined") {
+  const style = document.createElement("style");
+  style.textContent = `
+    @keyframes pulse-green {
+      0% { background-color: rgba(34,197,94,0.2); }
+      50% { background-color: rgba(34,197,94,0.5); }
+      100% { background-color: transparent; }
+    }
+    .animate-pulse-green {
+      animation: pulse-green 1.5s ease-in-out;
+    }
+  `;
+  document.head.appendChild(style);
 }

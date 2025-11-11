@@ -5,7 +5,7 @@ import { cookies } from "next/headers";
 import { Resend } from "resend";
 
 /* ----------------------------------------------------------
- * 🧠 Utility: Dev Bypass Helper
+ * 🧠 Dev Bypass Utility
  * ---------------------------------------------------------- */
 function isDevBypass(req: Request) {
   const origin = req.headers.get("origin") || req.headers.get("referer") || "";
@@ -28,7 +28,7 @@ function isDevBypass(req: Request) {
 }
 
 /* ----------------------------------------------------------
- * 🧠 Utility: Create Admin Supabase Client (Service Key)
+ * 🧩 Admin Supabase Client (Service Key)
  * ---------------------------------------------------------- */
 function createAdminClient() {
   return createClient(
@@ -39,7 +39,7 @@ function createAdminClient() {
 }
 
 /* ----------------------------------------------------------
- * 🧠 Utility: Get Supabase User from Authorization Header
+ * 🧠 Extract Supabase User from Auth Token
  * ---------------------------------------------------------- */
 async function getSupabaseUserFromToken(req: Request) {
   const authHeader = req.headers.get("authorization");
@@ -126,6 +126,29 @@ export async function POST(req: Request) {
         )
       : cookieClient;
 
+    // 🚫 Block claims on already claimed items
+    const { data: itemCheck, error: itemError } = await supabaseClient
+      .from("items")
+      .select("status")
+      .eq("id", item_id)
+      .maybeSingle();
+
+    if (itemError) {
+      console.error("Item check error:", itemError);
+      return NextResponse.json(
+        { success: false, error: "Could not verify item status." },
+        { status: 500 }
+      );
+    }
+
+    if (itemCheck?.status?.toLowerCase() === "claimed") {
+      return NextResponse.json(
+        { success: false, error: "This item has already been claimed." },
+        { status: 400 }
+      );
+    }
+
+    // ✅ Insert claim
     const { error } = await supabaseClient.from("claims").insert([
       {
         item_id,
@@ -172,6 +195,7 @@ export async function PATCH(req: Request) {
 
     const normalizedStatus = String(status).toLowerCase();
 
+    // 🧠 Update this claim
     const { error: updateError } = await supabase
       .from("claims")
       .update({ status: normalizedStatus })
@@ -179,23 +203,36 @@ export async function PATCH(req: Request) {
 
     if (updateError) throw updateError;
 
-    // ✅ Update related item
+    // ✅ If approved: mark item as claimed + reject others
     if (normalizedStatus === "approved") {
-      const { data: claimData } = await supabase
+      const { data: claimData, error: claimError } = await supabase
         .from("claims")
         .select("item_id")
         .eq("id", claim_id)
         .single();
 
+      if (claimError) throw claimError;
+
       if (claimData?.item_id) {
+        // 1️⃣ Mark item as Claimed
         await supabase
           .from("items")
           .update({ status: "Claimed" })
           .eq("id", claimData.item_id);
+
+        // 2️⃣ Reject all other pending claims for the same item
+        const { error: rejectError } = await supabase
+          .from("claims")
+          .update({ status: "rejected" })
+          .eq("item_id", claimData.item_id)
+          .neq("id", claim_id)
+          .eq("status", "pending");
+
+        if (rejectError) console.warn("Auto-reject error:", rejectError);
       }
     }
 
-    // ✅ Fetch claim details for email
+    // ✅ Email notification to claimant
     const { data: fullClaim } = await supabase
       .from("claims")
       .select(`*, profiles:claimed_by (email, full_name), items:item_id (name)`)
@@ -203,10 +240,9 @@ export async function PATCH(req: Request) {
       .maybeSingle();
 
     if (!fullClaim) {
-      console.warn("⚠️ No claim found for email notification.");
       return NextResponse.json({
         success: true,
-        message: `Claim ${normalizedStatus} successfully (no email sent).`,
+        message: `Claim ${normalizedStatus} updated (no email sent).`,
       });
     }
 
@@ -240,9 +276,13 @@ export async function PATCH(req: Request) {
       }
     }
 
+    // ✅ Response with toast-friendly message for frontend
     return NextResponse.json({
       success: true,
-      message: `Claim ${normalizedStatus} successfully!`,
+      message:
+        normalizedStatus === "approved"
+          ? "✅ Claim approved and all other pending claims rejected!"
+          : `Claim ${normalizedStatus} successfully!`,
     });
   } catch (err: any) {
     console.error("🔥 PATCH /claims error:", err.message);
