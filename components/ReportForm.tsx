@@ -9,6 +9,7 @@ export default function ReportForm() {
   const [description, setDescription] = useState("");
   const [category, setCategory] = useState("");
   const [campus, setCampus] = useState("");
+  const [location, setLocation] = useState(""); // ✅ New state
   const [status, setStatus] = useState("found");
   const [reporterName, setReporterName] = useState("");
   const [reporterEmail, setReporterEmail] = useState("");
@@ -35,6 +36,7 @@ export default function ReportForm() {
     fetchUserInfo();
   }, []);
 
+  // 📨 Handle submit
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -58,12 +60,13 @@ export default function ReportForm() {
       description,
       category,
       campus,
+      location, // ✅ Added location
       status: properStatus,
       userId: user.id,
       imageFile: image,
       reporterName,
       reporterEmail,
-    });
+    } as any);
 
     if (success) {
       setMessage("✅ Report submitted successfully!");
@@ -71,6 +74,7 @@ export default function ReportForm() {
       setDescription("");
       setCategory("");
       setCampus("");
+      setLocation(""); // ✅ Clear location
       setStatus("lost");
       setImage(null);
     } else {
@@ -86,7 +90,7 @@ export default function ReportForm() {
       className="max-w-2xl mx-auto p-6 bg-white dark:bg-gray-900 shadow-lg rounded-2xl space-y-5 transition-colors duration-300"
     >
       <h2 className="text-2xl font-bold text-center text-blue-700 dark:text-blue-400">
-      
+        Report Lost or Found Item
       </h2>
 
       {/* Item Name */}
@@ -103,7 +107,7 @@ export default function ReportForm() {
       <textarea
         value={description}
         onChange={(e) => setDescription(e.target.value)}
-        placeholder="Description"
+        placeholder="Description (include where or when it was lost/found)"
         className="border dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 p-2 w-full rounded-lg h-24 focus:ring-2 focus:ring-blue-400 outline-none"
         required
       />
@@ -150,6 +154,21 @@ export default function ReportForm() {
           <option value="Central Farm">Central Farm</option>
           <option value="Punta Gorda">Punta Gorda</option>
         </select>
+      </div>
+
+      {/* Location Field ✅ */}
+      <div>
+        <label className="block mb-1 font-medium text-gray-700 dark:text-gray-300">
+          Location
+        </label>
+        <input
+          type="text"
+          value={location}
+          onChange={(e) => setLocation(e.target.value)}
+          placeholder="e.g., Library, Cafeteria, ICT Lab, Bus Stop..."
+          className="border dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 p-2 w-full rounded-lg focus:ring-2 focus:ring-blue-400 outline-none"
+          required
+        />
       </div>
 
       {/* Status Dropdown */}
