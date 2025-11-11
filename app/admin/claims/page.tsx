@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
+/* ----------------------------- Types ----------------------------- */
 type ItemData = {
   id: string;
   name: string;
-  campus: string;
-  description: string;
+  campus: string | null;
+  description: string | null;
   image?: string | null;
   reporter_email?: string | null;
 };
@@ -22,10 +23,10 @@ type ProfileData = {
 type ClaimView = {
   id: string;
   message: string | null;
-  status: string | null;
+  status: string | null; // "pending" | "approved" | "rejected"
   created_at: string | null;
   items: ItemData | null;
-  profiles: ProfileData | null;
+  profiles: ProfileData | null; // claimant
 };
 
 type Message = {
@@ -34,31 +35,78 @@ type Message = {
   sender_id: string;
   content: string;
   created_at: string;
-  profiles?: { full_name: string | null; email: string | null };
+  profiles?: { full_name: string | null; email: string | null }; // joined sender profile
 };
 
+/* --------------------------- Utilities --------------------------- */
+const SUPABASE_PUBLIC_BUCKET =
+  "https://npudlbublntelxzmzlmu.supabase.co/storage/v1/object/public/item-photos";
+
+function resolveImage(src?: string | null) {
+  if (!src) return "/placeholder.png";
+  if (src.startsWith("http")) return src;
+  return `${SUPABASE_PUBLIC_BUCKET}/${src}`;
+}
+
+function formatWhen(ts?: string | null, withTime = true) {
+  if (!ts) return "—";
+  const d = new Date(ts);
+  return withTime
+    ? d.toLocaleString("en-BZ", {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      })
+    : d.toLocaleDateString("en-BZ", { year: "numeric", month: "short", day: "numeric" });
+}
+
+function statusBadgeCls(status?: string | null) {
+  const s = status?.toLowerCase();
+  if (s === "approved") return "bg-green-600 text-white";
+  if (s === "rejected") return "bg-red-600 text-white";
+  return "bg-yellow-500 text-white";
+}
+
+function titleCase(s?: string | null) {
+  if (!s) return "";
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function userLabel(p?: ProfileData | null) {
+  return p?.email || p?.full_name || "Anonymous";
+}
+
+/* --------------------------- Component --------------------------- */
 export default function AdminClaimsPage() {
   const [claims, setClaims] = useState<ClaimView[]>([]);
   const [selectedClaim, setSelectedClaim] = useState<ClaimView | null>(null);
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState("");
-  const [zoomImage, setZoomImage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [showToast, setShowToast] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+
+  // UI helpers
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "approved" | "rejected">(
+    "all"
+  );
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetchClaims();
   }, []);
 
-  // 🧠 Fetch all claims joined with items + profiles
+  /* -------------------- Fetch claims (with joins) -------------------- */
   async function fetchClaims() {
     setLoading(true);
     setErrorMsg(null);
-
     try {
       const { data, error } = await supabase
         .from("claims")
@@ -96,32 +144,23 @@ export default function AdminClaimsPage() {
     }
   }
 
-  // 🟢 Approve / Reject claim
-  async function updateClaimStatus(
-    claimId: string,
-    status: "approved" | "rejected"
-  ) {
+  /* -------------------------- Update status -------------------------- */
+  async function updateClaimStatus(claimId: string, status: "approved" | "rejected") {
     setActionLoading(claimId);
     try {
-      const { error } = await supabase
-        .from("claims")
-        .update({ status })
-        .eq("id", claimId);
+      const { error } = await supabase.from("claims").update({ status }).eq("id", claimId);
       if (error) throw error;
 
-      setClaims((prev) =>
-        prev.map((c) => (c.id === claimId ? { ...c, status } : c))
-      );
-
-      showToastMessage(`✅ Claim ${status.toUpperCase()} successfully!`);
+      setClaims((prev) => prev.map((c) => (c.id === claimId ? { ...c, status } : c)));
+      showToast(`✅ Claim ${status.toUpperCase()} successfully!`);
     } catch (err: any) {
-      showToastMessage("❌ " + err.message, "error");
+      showToast("❌ " + err.message, "error");
     } finally {
       setActionLoading(null);
     }
   }
 
-  // ✉️ Send message (Admin)
+  /* ----------------------------- Chat ----------------------------- */
   async function sendMessage(e: React.FormEvent) {
     e.preventDefault();
     if (!selectedClaim || !newMessage.trim()) return;
@@ -131,27 +170,23 @@ export default function AdminClaimsPage() {
       error: userError,
     } = await supabase.auth.getUser();
 
-    if (userError || !user) {
-      console.error("No logged-in admin found.");
-      return;
-    }
+    if (userError || !user) return;
 
     const { error } = await supabase.from("messages").insert([
       {
         claim_id: selectedClaim.id,
-        sender_id: user.id,
+        sender_id: user.id, // real admin id
         content: newMessage.trim(),
       },
     ]);
 
-    if (error) console.error("Send message error:", error);
-    else setNewMessage("");
+    if (!error) setNewMessage("");
   }
 
-  // 💬 Load messages for selected claim
+  // Load messages when a claim is selected + realtime
   useEffect(() => {
-    if (!selectedClaim?.id) return;
-    const claimId = selectedClaim.id;
+    const claimId = selectedClaim?.id;
+    if (!claimId) return;
 
     async function loadMessages() {
       const { data, error } = await supabase
@@ -169,15 +204,8 @@ export default function AdminClaimsPage() {
       .channel(`messages:claim=${claimId}`)
       .on(
         "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "messages",
-          filter: `claim_id=eq.${claimId}`,
-        },
-        (payload) => {
-          setMessages((prev) => [...prev, payload.new as Message]);
-        }
+        { event: "INSERT", schema: "public", table: "messages", filter: `claim_id=eq.${claimId}` },
+        (payload) => setMessages((prev) => [...prev, payload.new as Message])
       )
       .subscribe();
 
@@ -186,200 +214,329 @@ export default function AdminClaimsPage() {
     };
   }, [selectedClaim]);
 
-  // ✨ Toast handler
-  function showToastMessage(msg: string, type: "success" | "error" = "success") {
-    setToastMsg(msg);
-    setShowToast(true);
-    setTimeout(() => setShowToast(false), 4000);
-  }
-
-  // 🪄 Auto-scroll to latest message
+  // autoscroll
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  if (loading)
-    return <div className="text-center py-16 text-gray-400">Loading claims...</div>;
+  /* --------------------------- Toast helper --------------------------- */
+  function showToast(msg: string, type: "success" | "error" | "info" = "success") {
+    setToastMsg(msg);
+    setShowToast(true);
+    setTimeout(() => setShowToast(false), 3500);
+  }
 
-  if (errorMsg)
+  /* ------------------------ Filters & searching ----------------------- */
+  const filteredClaims = useMemo(() => {
+    return claims.filter((c) => {
+      const matchesStatus =
+        statusFilter === "all" ? true : (c.status || "pending").toLowerCase() === statusFilter;
+      const hay =
+        `${c.items?.name ?? ""} ${c.items?.campus ?? ""} ${c.profiles?.email ?? ""} ${c.message ?? ""}`
+          .toLowerCase()
+          .trim();
+      const matchesSearch = hay.includes(search.toLowerCase().trim());
+      return matchesStatus && matchesSearch;
+    });
+  }, [claims, statusFilter, search]);
+
+  /* ------------------------------- UI ------------------------------- */
+  if (loading) {
     return (
-      <div className="text-center py-16 text-red-400">
+      <div className="text-center py-16 text-gray-400 dark:text-gray-500">Loading claims…</div>
+    );
+  }
+
+  if (errorMsg) {
+    return (
+      <div className="text-center py-16 text-red-500">
         Failed to load claims: {errorMsg}
+        <div className="mt-4">
+          <button
+            onClick={fetchClaims}
+            className="px-4 py-2 rounded-md bg-blue-600 text-white hover:bg-blue-500"
+          >
+            Retry
+          </button>
+        </div>
       </div>
     );
+  }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto relative">
+    <div className="p-6 max-w-7xl mx-auto">
       <h1 className="text-3xl font-bold text-ubGold mb-6">Claims Management</h1>
 
-      {/* 🔔 Toast */}
+      {/* Toast */}
       {showToast && toastMsg && (
-        <div className="fixed top-6 right-6 bg-green-600 text-white px-5 py-3 rounded-lg shadow-lg">
+        <div className="fixed top-6 right-6 z-[100] px-4 py-2 rounded-lg shadow-lg text-white bg-green-600">
           {toastMsg}
         </div>
       )}
 
-      {/* 📋 Table View */}
+      {/* If no claim selected, show card list (Phase 1) */}
       {!selectedClaim ? (
-        <div className="overflow-x-auto bg-white dark:bg-gray-800 rounded-xl shadow-md border border-gray-700">
-          <table className="min-w-full text-sm">
-            <thead className="bg-gray-100 dark:bg-gray-700 text-left text-gray-800 dark:text-gray-200">
-              <tr>
-                <th className="px-5 py-3 font-semibold">Item</th>
-                <th className="px-5 py-3 font-semibold">Campus</th>
-                <th className="px-5 py-3 font-semibold">Claimant</th>
-                <th className="px-5 py-3 font-semibold">Claim Message</th>
-                <th className="px-5 py-3 font-semibold">Status</th>
-                <th className="px-5 py-3 font-semibold">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {claims.map((c) => (
-                <tr
-                  key={c.id}
-                  className="border-b dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer transition"
+        <>
+          {/* Controls */}
+          <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="flex gap-2">
+              {(["all", "pending", "approved", "rejected"] as const).map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setStatusFilter(s)}
+                  className={`px-3 py-1.5 rounded-md text-sm font-medium border transition ${
+                    statusFilter === s
+                      ? "bg-ubGold text-black border-yellow-500"
+                      : "bg-white/5 border-gray-700 text-gray-300 hover:bg-white/10"
+                  }`}
                 >
-                  <td className="px-5 py-3 font-semibold text-ubGold">
-                    {c.items?.name ?? "—"}
-                  </td>
-                  <td className="px-5 py-3 text-gray-400">{c.items?.campus ?? "—"}</td>
-                  <td className="px-5 py-3">
-                    {c.profiles?.email || c.profiles?.full_name || "—"}
-                  </td>
-                  <td className="px-5 py-3 text-gray-300 max-w-xs truncate">
-                    {c.message || "—"}
-                  </td>
-                  <td className="px-5 py-3">
-                    <span
-                      className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                        c.status === "approved"
-                          ? "bg-green-600 text-white"
-                          : c.status === "rejected"
-                          ? "bg-red-600 text-white"
-                          : "bg-yellow-500 text-white"
-                      }`}
-                    >
-                      {c.status ?? "Pending"}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3 space-x-2">
-                    <button
-                      onClick={() => setSelectedClaim(c)}
-                      className="px-3 py-1 bg-blue-600 text-white rounded-md"
-                    >
-                      View Chat
-                    </button>
-                    <button
-                      onClick={() => updateClaimStatus(c.id, "approved")}
-                      className="px-3 py-1 bg-green-600 text-white rounded-md"
-                    >
-                      Approve
-                    </button>
-                    <button
-                      onClick={() => updateClaimStatus(c.id, "rejected")}
-                      className="px-3 py-1 bg-red-600 text-white rounded-md"
-                    >
-                      Reject
-                    </button>
-                  </td>
-                </tr>
+                  {s === "all" ? "All" : titleCase(s)}
+                </button>
               ))}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        // 💬 Chat View
-        <div className="max-w-3xl mx-auto bg-gray-900 text-white rounded-xl shadow-lg overflow-hidden">
-          <div className="bg-gray-800 px-5 py-3 flex justify-between items-center border-b border-gray-700">
-            <div>
-              <h2 className="text-lg font-semibold">{selectedClaim.items?.name}</h2>
-              <p className="text-xs text-gray-400">
-                {selectedClaim.profiles?.email || "Unknown"} •{" "}
-                {selectedClaim.items?.campus}
-              </p>
-              {selectedClaim.message && (
-                <p className="text-sm text-gray-300 mt-2 italic">
-                  “{selectedClaim.message}”
-                </p>
-              )}
             </div>
+
+            <div className="relative w-full md:w-80">
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search by item, campus, claimant, message…"
+                className="w-full rounded-lg bg-gray-900 border border-gray-700 text-gray-100 px-3 py-2 outline-none focus:ring-2 focus:ring-ubGold"
+              />
+              <span className="pointer-events-none absolute right-3 top-2.5 text-gray-500">⌕</span>
+            </div>
+          </div>
+
+          {/* Cards grid */}
+          {filteredClaims.length === 0 ? (
+            <p className="text-gray-400 text-center py-10">No claims match your filter.</p>
+          ) : (
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+              {filteredClaims.map((c) => {
+                const status = (c.status || "pending").toLowerCase();
+                return (
+                  <div
+                    key={c.id}
+                    className={`rounded-xl overflow-hidden border transition shadow-sm hover:shadow-md cursor-default ${
+                      status === "pending"
+                        ? "border-yellow-600/40 ring-1 ring-yellow-600/30"
+                        : "border-gray-700"
+                    } bg-gray-900`}
+                  >
+                    <div
+                      className="h-40 bg-gray-800 overflow-hidden"
+                      onClick={() => setSelectedClaim(c)}
+                      title="Open chat"
+                    >
+                      <img
+                        src={resolveImage(c.items?.image || null)}
+                        alt={c.items?.name || "Item"}
+                        className="w-full h-full object-cover opacity-90 hover:opacity-100 transition"
+                        onError={(e) => ((e.currentTarget.src = "/placeholder.png"))}
+                      />
+                    </div>
+
+                    <div className="p-4 space-y-2">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <h3 className="text-lg font-semibold text-gray-100">
+                            {c.items?.name ?? "Untitled"}
+                          </h3>
+                          <p className="text-xs text-gray-400">{c.items?.campus || "—"}</p>
+                        </div>
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[11px] font-semibold ${statusBadgeCls(
+                            c.status
+                          )}`}
+                        >
+                          {titleCase(c.status || "pending")}
+                        </span>
+                      </div>
+
+                      <div className="text-xs text-gray-400">
+                        <span className="font-medium text-gray-300">Claimant:</span>{" "}
+                        {userLabel(c.profiles)}
+                      </div>
+
+                      {c.message && (
+                        <p className="text-sm text-gray-300 line-clamp-2">{c.message}</p>
+                      )}
+
+                      <div className="flex items-center justify-between pt-2">
+                        <span className="text-[11px] text-gray-500">
+                          {formatWhen(c.created_at, true)}
+                        </span>
+
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => setSelectedClaim(c)}
+                            className="px-3 py-1 rounded-md bg-blue-600 text-white text-sm hover:bg-blue-500"
+                          >
+                            Chat
+                          </button>
+                          <button
+                            onClick={() => updateClaimStatus(c.id, "approved")}
+                            disabled={actionLoading === c.id}
+                            className="px-3 py-1 rounded-md bg-green-600 text-white text-sm hover:bg-green-500 disabled:opacity-50"
+                          >
+                            Approve
+                          </button>
+                          <button
+                            onClick={() => updateClaimStatus(c.id, "rejected")}
+                            disabled={actionLoading === c.id}
+                            className="px-3 py-1 rounded-md bg-red-600 text-white text-sm hover:bg-red-500 disabled:opacity-50"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
+      ) : (
+        /* -------------------------- Chat view (Phase 2) -------------------------- */
+        <div className="max-w-4xl mx-auto rounded-xl overflow-hidden border border-gray-800 bg-gray-900 shadow-lg">
+          {/* Header */}
+          <div className="flex items-center justify-between gap-3 px-5 py-3 bg-gray-800/70 border-b border-gray-800">
+            <div className="flex items-center gap-3">
+              <img
+                src={resolveImage(selectedClaim.items?.image || null)}
+                alt="Item"
+                className="w-12 h-12 rounded-lg object-cover border border-gray-700"
+                onError={(e) => ((e.currentTarget.src = "/placeholder.png"))}
+              />
+              <div>
+                <h2 className="text-lg font-semibold text-gray-100">
+                  {selectedClaim.items?.name}
+                </h2>
+                <p className="text-xs text-gray-400">
+                  {userLabel(selectedClaim.profiles)} • {selectedClaim.items?.campus || "—"}
+                </p>
+                {selectedClaim.message && (
+                  <p className="text-[12px] text-gray-300 mt-1 italic">
+                    “{selectedClaim.message}”
+                  </p>
+                )}
+              </div>
+            </div>
+
             <button
               onClick={() => setSelectedClaim(null)}
-              className="text-sm text-gray-300 hover:text-white bg-gray-700 px-3 py-1 rounded-md"
+              className="text-sm text-gray-200 bg-gray-700 px-3 py-1 rounded-md hover:bg-gray-600"
             >
               ← Back
             </button>
           </div>
 
-          {/* Chat messages */}
-          <div className="p-4 h-[65vh] overflow-y-auto space-y-3">
-            {messages.map((msg) => {
-              const isAdmin =
-                msg.profiles?.email && !msg.profiles.email.endsWith("@ub.edu.bz");
-              return (
-                <div
-                  key={msg.id}
-                  className={`flex ${isAdmin ? "justify-end" : "justify-start"}`}
-                >
-                  <div
-                    className={`p-3 rounded-2xl max-w-[75%] shadow-md ${
-                      isAdmin
-                        ? "bg-ubGold text-black rounded-br-none"
-                        : "bg-gray-800 text-gray-100 border border-gray-700 rounded-bl-none"
-                    }`}
-                  >
-                    <div className="flex justify-between items-center mb-1">
-                      <span className="text-xs font-medium text-gray-400">
-                        {isAdmin ? "Admin" : msg.profiles?.email || "User"}
-                      </span>
-                      <span className="text-[10px] text-gray-400">
-                        {new Date(msg.created_at).toLocaleTimeString([], {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </span>
-                    </div>
-                    <p className="text-sm">{msg.content}</p>
-                  </div>
-                </div>
-              );
-            })}
-            <div ref={messagesEndRef} />
-          </div>
+          {/* Messages */}
+          <ChatMessages
+            messages={messages}
+            claimantId={selectedClaim.profiles?.id || "__unknown__"}
+          />
 
+          {/* Input */}
           <form
             onSubmit={sendMessage}
-            className="p-4 border-t border-gray-700 flex items-center space-x-2 bg-gray-800"
+            className="p-4 border-t border-gray-800 bg-gray-850 flex items-center gap-2"
           >
             <input
-              type="text"
               value={newMessage}
               onChange={(e) => setNewMessage(e.target.value)}
-              placeholder="Type your message..."
-              className="flex-1 px-4 py-2 rounded-lg bg-gray-900 border border-gray-700 text-white outline-none focus:ring-2 focus:ring-ubGold"
+              placeholder="Type your message…"
+              className="flex-1 px-4 py-2 rounded-lg bg-gray-950 border border-gray-800 text-gray-100 outline-none focus:ring-2 focus:ring-ubGold"
             />
             <button
               type="submit"
-              className="px-4 py-2 bg-ubGold text-black font-semibold rounded-lg hover:bg-yellow-400"
+              className="px-4 py-2 rounded-lg bg-ubGold text-black font-semibold hover:bg-yellow-400"
             >
               Send
             </button>
           </form>
+
+          <div ref={messagesEndRef} />
         </div>
       )}
+    </div>
+  );
+}
 
-      {/* 🔍 Zoomed Image */}
-      {zoomImage && (
-        <div
-          onClick={() => setZoomImage(null)}
-          className="fixed inset-0 bg-black/90 z-[9999] flex justify-center items-center"
-        >
-          <img
-            src={zoomImage}
-            alt="Zoomed Item"
-            className="max-h-[90vh] max-w-[90vw] object-contain rounded-lg shadow-lg cursor-zoom-out"
-          />
-        </div>
+/* ---------------------- Chat Messages component ---------------------- */
+function ChatMessages({
+  messages,
+  claimantId,
+}: {
+  messages: Message[];
+  claimantId: string;
+}) {
+  // Build chunks by calendar day + same-sender groups
+  const withSeparators = useMemo(() => {
+    const out: Array<
+      | { kind: "day"; label: string }
+      | { kind: "msg"; msg: Message; isAdmin: boolean; grouped: boolean }
+    > = [];
+
+    let lastDay = "";
+    let lastSender = "";
+
+    for (const m of messages) {
+      const d = new Date(m.created_at);
+      const day = d.toDateString();
+      if (day !== lastDay) {
+        out.push({
+          kind: "day",
+          label: day === new Date().toDateString() ? "Today" : d.toLocaleDateString("en-BZ", { weekday: "short", year: "numeric", month: "short", day: "numeric" }),
+        });
+        lastDay = day;
+        lastSender = ""; // break grouping across days
+      }
+      const isAdmin = m.sender_id !== claimantId;
+      const grouped = m.sender_id === lastSender;
+      out.push({ kind: "msg", msg: m, isAdmin, grouped });
+      lastSender = m.sender_id;
+    }
+    return out;
+  }, [messages, claimantId]);
+
+  return (
+    <div className="p-4 h-[65vh] overflow-y-auto space-y-3 bg-[#0f141b]">
+      {withSeparators.map((node, idx) =>
+        node.kind === "day" ? (
+          <div
+            key={`day-${idx}`}
+            className="text-center my-2 text-[11px] uppercase tracking-wider text-gray-400"
+          >
+            {node.label}
+          </div>
+        ) : (
+          <div
+            key={node.msg.id}
+            className={`flex ${node.isAdmin ? "justify-end" : "justify-start"}`}
+          >
+            <div
+              className={`max-w-[78%] px-3 py-2 rounded-2xl shadow-sm ${
+                node.isAdmin
+                  ? "bg-ubGold text-black rounded-br-none"
+                  : "bg-gray-800 text-gray-100 border border-gray-700 rounded-bl-none"
+              } ${node.grouped ? "-mt-1" : ""}`}
+            >
+              {!node.isAdmin && !node.grouped && (
+                <p className="text-[11px] text-gray-400 mb-0.5">
+                  {node.msg.profiles?.full_name || node.msg.profiles?.email || "User"}
+                </p>
+              )}
+              <p className="text-sm leading-relaxed">{node.msg.content}</p>
+              <p className="text-[10px] text-gray-400 mt-0.5 text-right">
+                {new Date(node.msg.created_at).toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </p>
+            </div>
+          </div>
+        )
       )}
     </div>
   );
