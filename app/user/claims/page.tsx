@@ -50,7 +50,7 @@ export default function MyClaimsPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const typingTimeout = useRef<any>(null);
 
-  // Auto-scroll
+  // Auto-scroll to bottom when messages update
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -96,7 +96,7 @@ export default function MyClaimsPage() {
           let imageUrl = null;
           if (item?.image) {
             const { data: publicData } = supabase.storage
-              .from("item-images")
+              .from("item-photos")
               .getPublicUrl(item.image);
             imageUrl = publicData?.publicUrl || null;
           }
@@ -202,7 +202,7 @@ export default function MyClaimsPage() {
       .upload(filePath, file, { upsert: true });
 
     if (!error) {
-      const imageUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/chat_uploads/${filePath}`;
+      const imageUrl = `https://npudlbublntelxzmzlmu.supabase.co/storage/v1/object/public/chat_uploads/${filePath}`;
       await supabase.from("messages").insert([
         {
           claim_id: selectedClaim.id,
@@ -211,6 +211,8 @@ export default function MyClaimsPage() {
           is_admin: false,
         },
       ]);
+    } else {
+      console.error("Upload error:", error.message);
     }
   }
 
@@ -337,7 +339,9 @@ export default function MyClaimsPage() {
           <div className="p-4 h-[60vh] overflow-y-auto space-y-3">
             {messages.map((msg) => {
               const isUser = msg.sender_id === user?.id;
-              const isImage = msg.content.match(/\.(jpg|jpeg|png|gif)$/i);
+              const isImage = msg.content.includes(
+                "https://npudlbublntelxzmzlmu.supabase.co"
+              );
               return (
                 <div
                   key={msg.id}
@@ -359,7 +363,7 @@ export default function MyClaimsPage() {
                       <img
                         src={msg.content}
                         alt="Proof"
-                        className="rounded-lg cursor-pointer mt-1"
+                        className="rounded-lg cursor-pointer mt-1 max-h-56 object-cover"
                         onClick={() => setZoomImage(msg.content)}
                       />
                     ) : (
