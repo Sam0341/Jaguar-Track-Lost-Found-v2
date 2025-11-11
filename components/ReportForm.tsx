@@ -90,7 +90,7 @@ export default function ReportForm() {
       className="max-w-2xl mx-auto p-6 bg-white dark:bg-gray-900 shadow-lg rounded-2xl space-y-5 transition-colors duration-300"
     >
       <h2 className="text-2xl font-bold text-center text-blue-700 dark:text-blue-400">
-        Report Lost or Found Item
+        
       </h2>
 
       {/* Item Name */}
