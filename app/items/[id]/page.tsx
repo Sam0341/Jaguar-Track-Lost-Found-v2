@@ -14,23 +14,23 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
   const [claimMessage, setClaimMessage] = useState("");
   const [showClaimForm, setShowClaimForm] = useState(false);
   const [feedback, setFeedback] = useState("");
-
   const router = useRouter();
 
   const PUBLIC_BUCKET =
     `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/item-photos`;
 
-  // Load item + user + claim info
+  // Load item + user + claims
   useEffect(() => {
-    async function loadAll() {
-      const { data: { session } } = await supabase.auth.getSession();
+    async function loadData() {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const session = sessionData?.session;
       setUser(session?.user || null);
 
       if (session?.user?.user_metadata?.role === "admin") {
         setIsAdmin(true);
       }
 
-      // Load item
+      // Load the item
       const { data, error } = await supabase
         .from("items")
         .select(`
@@ -49,22 +49,26 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
         .eq("id", params.id)
         .maybeSingle();
 
-      if (error) console.log(error);
+      if (!error && data) {
+        const campusObj = Array.isArray(data.campus) ? data.campus[0] : data.campus;
+        const categoryObj = Array.isArray(data.category) ? data.category[0] : data.category;
+        const reporterObj = Array.isArray(data.reporter) ? data.reporter[0] : data.reporter;
 
-      if (data) {
         setItem({
           ...data,
-          campus: data.campus?.[0]?.name || "Unknown Campus",
-          category: data.category?.[0]?.name || "Other",
-          reporter_name: data.reporter?.[0]?.full_name || "Unknown",
-          reporter_email: data.reporter?.[0]?.email || "",
+          campus: campusObj?.name || "Unknown Campus",
+          category: categoryObj?.name || "Other",
+          reporter_name: reporterObj?.full_name || "Unknown",
+          reporter_email: reporterObj?.email || "",
           image_url: data.image
-            ? (data.image.startsWith("http") ? data.image : `${PUBLIC_BUCKET}/${data.image}`)
+            ? (data.image.startsWith("http")
+                ? data.image
+                : `${PUBLIC_BUCKET}/${data.image}`)
             : null,
         });
       }
 
-      // Load claim status for user
+      // Load user's claim status
       if (session?.user) {
         const { data: claim } = await supabase
           .from("claims")
@@ -80,12 +84,11 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
       }
     }
 
-    loadAll();
+    loadData();
   }, [params.id]);
 
-  // Format date
-  const formatDate = (timestamp: string) =>
-    new Date(timestamp).toLocaleString("en-US", {
+  const formatDate = (ts: string) =>
+    new Date(ts).toLocaleString("en-US", {
       weekday: "short",
       month: "long",
       day: "numeric",
@@ -94,8 +97,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
       minute: "2-digit",
     });
 
-  // Submit claim
-  const handleClaimSubmit = async (e: any) => {
+  const submitClaim = async (e: any) => {
     e.preventDefault();
     if (!user) return router.push("/login");
 
@@ -120,7 +122,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
     if (result.success) {
       setClaimStatus("Pending");
       setClaimId(result.claim_id);
-      setFeedback("✅ Claim submitted!");
+      setFeedback("✔ Claim submitted!");
       setShowClaimForm(false);
     } else {
       setFeedback("❌ Failed to submit claim.");
@@ -135,122 +137,94 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
     );
   }
 
-  const isClaimed = item.status?.toLowerCase() === "claimed";
-
   return (
-    <div className="container mx-auto p-6">
-      <div className="grid md:grid-cols-2 gap-6">
+    <div className="container mx-auto p-6 pb-20">
+      <div className="grid md:grid-cols-2 gap-8">
 
-        {/* IMAGE */}
-        <div className="rounded-xl overflow-hidden bg-gray-200">
+        {/* IMAGE SECTION */}
+        <div className="bg-gray-200 dark:bg-gray-800 rounded-xl overflow-hidden shadow">
           <img
             src={item.image_url || "https://placehold.co/600x400?text=No+Image"}
-            className="w-full h-80 object-cover"
+            className="w-full h-[360px] object-cover rounded-xl"
           />
         </div>
 
         {/* DETAILS */}
-        <div className="bg-white dark:bg-gray-900 rounded-xl p-6 shadow border border-gray-700">
+        <div className="bg-white dark:bg-gray-900 p-6 rounded-xl shadow border border-gray-200 dark:border-gray-700">
 
-          <h1 className="text-2xl font-bold mb-2 dark:text-white">{item.name}</h1>
-
-          <p className="text-gray-700 dark:text-gray-300">{item.description}</p>
+          <h1 className="text-3xl font-bold dark:text-white mb-2">{item.name}</h1>
+          <p className="text-gray-600 dark:text-gray-300">{item.description}</p>
 
           {/* TAGS */}
           <div className="flex flex-wrap gap-2 mt-4">
-            <span className="px-3 py-1 bg-gray-700 text-white rounded-full text-sm">
-              {item.category}
-            </span>
+            <span className="badge bg-gray-700 text-white">{item.category}</span>
+            <span className="badge bg-blue-700 text-white">{item.campus}</span>
 
-            <span className="px-3 py-1 bg-blue-700 text-white rounded-full text-sm">
-              {item.campus}
-            </span>
-
-            <span className={`px-3 py-1 rounded-full text-sm ${
-              item.status === "found"
-                ? "bg-green-700 text-white"
-                : "bg-yellow-500 text-black"
-            }`}>
+            <span
+              className={`badge ${
+                item.status === "found"
+                  ? "bg-green-600 text-white"
+                  : "bg-yellow-500 text-black"
+              }`}
+            >
               {item.status.toUpperCase()}
             </span>
           </div>
 
-          {/* REPORTER */}
+          {/* REPORTER INFO */}
           <div className="mt-5 text-sm dark:text-gray-300 space-y-1">
-            <p>
-              <strong className="text-gray-500 dark:text-gray-400">
-                Reported by:
-              </strong>{" "}
-              {item.reporter_name}
-            </p>
+            <p><strong className="text-gray-500">Reported by:</strong> {item.reporter_name}</p>
 
             {isAdmin && (
               <p>
-                <strong className="text-gray-500 dark:text-gray-400">
-                  Reporter Email:
-                </strong>{" "}
-                {item.reporter_email}
+                <strong className="text-gray-500">Reporter Email:</strong> {item.reporter_email}
               </p>
             )}
 
             <p>
-              <strong className="text-gray-500 dark:text-gray-400">
-                Reported At:
-              </strong>{" "}
+              <strong className="text-gray-500">Reported At:</strong>{" "}
               {item.reported_at ? formatDate(item.reported_at) : "Unknown"}
             </p>
 
             <p>
-              <strong className="text-gray-500 dark:text-gray-400">
-                Location:
-              </strong>{" "}
-              {item.location || "Not Provided"}
+              <strong className="text-gray-500">Location:</strong> {item.location || "Not provided"}
             </p>
           </div>
 
           {/* CLAIM SECTION */}
-          {!isClaimed && user && (
-            <>
-              {claimStatus === "Pending" && (
-                <p className="mt-4 text-yellow-600 dark:text-yellow-400">
-                  🕒 Your claim is pending admin approval.
-                </p>
-              )}
+          {!claimStatus && (
+            <button
+              onClick={() => setShowClaimForm(!showClaimForm)}
+              className="mt-6 w-full bg-ubBlue text-white py-2 rounded-lg hover:opacity-80"
+            >
+              Claim This Item
+            </button>
+          )}
 
-              {claimStatus === "Approved" && (
-                <p className="mt-4 text-green-600">
-                  ✅ Your claim was approved!
-                </p>
-              )}
+          {claimStatus === "Pending" && (
+            <p className="mt-4 text-yellow-500">🕒 Your claim is pending approval.</p>
+          )}
 
-              {!claimStatus && (
-                <button
-                  className="mt-6 w-full bg-ubBlue text-white py-2 rounded-lg hover:opacity-80"
-                  onClick={() => setShowClaimForm(!showClaimForm)}
-                >
-                  Claim This Item
-                </button>
-              )}
+          {claimStatus === "Approved" && (
+            <p className="mt-4 text-green-500">✔ Your claim was approved!</p>
+          )}
 
-              {showClaimForm && (
-                <form onSubmit={handleClaimSubmit} className="mt-4">
-                  <textarea
-                    className="w-full p-2 border rounded dark:bg-gray-800 dark:text-white"
-                    rows={3}
-                    placeholder="Optional message"
-                    value={claimMessage}
-                    onChange={(e) => setClaimMessage(e.target.value)}
-                  />
-
-                  <button
-                    type="submit"
-                    className="mt-3 w-full bg-green-700 text-white py-2 rounded-lg"
-                  >
-                    Submit Claim
-                  </button>
-                </form>
-              )}
-            </>
+          {showClaimForm && (
+            <form onSubmit={submitClaim} className="mt-4">
+              <textarea
+                rows={3}
+                placeholder="Optional message to admin"
+                value={claimMessage}
+                onChange={(e) => setClaimMessage(e.target.value)}
+                className="w-full p-3 rounded-lg border dark:bg-gray-800 dark:text-white"
+              />
+              <button
+                type="submit"
+                className="mt-3 w-full bg-green-700 text-white py-2 rounded-lg hover:opacity-90"
+              >
+                Submit Claim
+              </button>
+            </form>
           )}
 
           {feedback && (
@@ -261,13 +235,13 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
           {claimId && (
             <Link
               href={`/user/chat/${claimId}`}
-              className="mt-4 block text-center px-4 py-2 bg-ubGold rounded-lg font-bold"
+              className="mt-4 block text-center bg-ubGold py-2 rounded-lg font-bold hover:opacity-90"
             >
               💬 Chat with Admin
             </Link>
           )}
 
-          <Link href="/items" className="mt-6 inline-block text-blue-500">
+          <Link href="/items" className="mt-6 inline-block text-blue-600 dark:text-blue-400">
             ← Back to Items
           </Link>
         </div>
