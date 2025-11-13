@@ -1,0 +1,335 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { supabase } from "@/lib/supabaseClient";
+
+type Item = {
+  id: string;
+  name: string;
+  category: string | null;
+  campus: string | null;
+  location: string | null;
+  status: string;
+  description?: string;
+  image?: string;
+  reported_at?: string;
+  reporter_name?: string;
+};
+
+export default function StoragePage() {
+  const [items, setItems] = useState<Item[]>([]);
+  const [filteredItems, setFilteredItems] = useState<Item[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const [searchTerm, setSearchTerm] = useState("");
+  const [campusFilter, setCampusFilter] = useState("All");
+  const [statusFilter, setStatusFilter] = useState("All");
+  const [storageFilter, setStorageFilter] = useState("All");
+
+  const [selectedItem, setSelectedItem] = useState<Item | null>(null);
+  const [showModal, setShowModal] = useState(false);
+
+  const [newStorage, setNewStorage] = useState("");
+  const [toast, setToast] = useState<{ msg: string; type: string } | null>(null);
+
+  // PAGINATION
+  const [page, setPage] = useState(1);
+  const PER_PAGE = 8;
+
+  useEffect(() => {
+    fetchItems();
+  }, []);
+
+  // Fetch all items
+  async function fetchItems() {
+    setLoading(true);
+
+    const { data, error } = await supabase
+      .from("items")
+      .select("*")
+      .order("reported_at", { ascending: false });
+
+    if (!error && data) {
+      setItems(data);
+      setFilteredItems(data);
+    }
+
+    setLoading(false);
+  }
+
+  // Filters
+  useEffect(() => {
+    let data = [...items];
+
+    if (campusFilter !== "All")
+      data = data.filter((i) => i.campus === campusFilter);
+
+    if (statusFilter !== "All")
+      data = data.filter((i) => i.status === statusFilter);
+
+    if (storageFilter !== "All")
+      data = data.filter((i) => (i.location || "N/A") === storageFilter);
+
+    if (searchTerm.trim() !== "") {
+      const term = searchTerm.toLowerCase();
+      data = data.filter(
+        (i) =>
+          i.name.toLowerCase().includes(term) ||
+          (i.location || "").toLowerCase().includes(term) ||
+          (i.campus || "").toLowerCase().includes(term)
+      );
+    }
+
+    setFilteredItems(data);
+  }, [searchTerm, campusFilter, statusFilter, storageFilter, items]);
+
+  // Update storage location
+  async function updateStorage() {
+    if (!selectedItem) return;
+
+    const { error } = await supabase
+      .from("items")
+      .update({ location: newStorage })
+      .eq("id", selectedItem.id);
+
+    if (!error) {
+      showToast("Storage updated!", "success");
+      setShowModal(false);
+      fetchItems();
+    } else {
+      showToast("Failed to update storage!", "error");
+    }
+  }
+
+  // Mark as claimed
+  async function markAsClaimed(id: string) {
+    const { error } = await supabase
+      .from("items")
+      .update({ status: "Claimed" })
+      .eq("id", id);
+
+    if (!error) {
+      showToast("Marked as claimed!", "success");
+      fetchItems();
+    } else {
+      showToast("Update failed!", "error");
+    }
+  }
+
+  // Delete item
+  async function deleteItem(id: string) {
+    const yes = confirm("Delete this item?");
+    if (!yes) return;
+
+    const { error } = await supabase.from("items").delete().eq("id", id);
+
+    if (!error) {
+      showToast("Item deleted!", "success");
+      fetchItems();
+    } else {
+      showToast("Delete failed!", "error");
+    }
+  }
+
+  const storageLocations = Array.from(
+    new Set(items.map((i) => i.location || "N/A"))
+  );
+
+  const campuses = Array.from(new Set(items.map((i) => i.campus)));
+
+  const showToast = (msg: string, type: string) => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  // Pagination
+  const totalPages = Math.ceil(filteredItems.length / PER_PAGE);
+
+  const paginatedItems = filteredItems.slice(
+    (page - 1) * PER_PAGE,
+    page * PER_PAGE
+  );
+
+  return (
+    <div className="p-6 max-w-7xl mx-auto">
+
+      <h1 className="text-3xl font-bold text-ubGold mb-6">📦 Storage Inventory</h1>
+
+      {toast && (
+        <div
+          className={`fixed top-5 right-5 px-4 py-2 rounded shadow-lg text-white ${
+            toast.type === "success" ? "bg-green-600" : "bg-red-600"
+          }`}
+        >
+          {toast.msg}
+        </div>
+      )}
+
+      {/* Filters */}
+      <div className="grid sm:grid-cols-4 gap-4 mb-6">
+        <input
+          type="text"
+          placeholder="Search items…"
+          className="px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+        />
+
+        <select
+          className="px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white"
+          value={campusFilter}
+          onChange={(e) => setCampusFilter(e.target.value)}
+        >
+          <option>All</option>
+          {campuses.map((camp) => (
+            <option key={camp}>{camp}</option>
+          ))}
+        </select>
+
+        <select
+          className="px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white"
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+        >
+          <option>All</option>
+          <option>Lost</option>
+          <option>Found</option>
+          <option>Claimed</option>
+        </select>
+
+        <select
+          className="px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white"
+          value={storageFilter}
+          onChange={(e) => setStorageFilter(e.target.value)}
+        >
+          <option>All</option>
+          {storageLocations.map((loc) => (
+            <option key={loc}>{loc}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Table */}
+      {loading ? (
+        <p className="text-gray-500 text-center py-20">Loading storage…</p>
+      ) : paginatedItems.length === 0 ? (
+        <p className="text-gray-400 text-center">No items found.</p>
+      ) : (
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {paginatedItems.map((item) => (
+            <div
+              key={item.id}
+              className="bg-gray-900 border border-gray-700 rounded-lg p-4 shadow hover:border-ubGold cursor-pointer"
+              onClick={() => {
+                setSelectedItem(item);
+                setNewStorage(item.location || "");
+                setShowModal(true);
+              }}
+            >
+              {item.image && (
+                <img
+                  src={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/item-photos/${item.image}`}
+                  className="w-full h-40 object-cover rounded mb-3"
+                />
+              )}
+
+              <h2 className="text-lg font-bold text-ubGold">{item.name}</h2>
+              <p className="text-gray-400 text-sm">{item.category}</p>
+              <p className="text-gray-500 text-sm mt-1">
+                Campus: <span className="text-gray-300">{item.campus}</span>
+              </p>
+              <p className="text-gray-500 text-sm">
+                Stored At: <span className="text-gray-300">{item.location || "N/A"}</span>
+              </p>
+
+              <span
+                className={`inline-block mt-2 px-2 py-1 rounded text-xs font-semibold ${
+                  item.status === "Claimed"
+                    ? "bg-green-600"
+                    : item.status === "Lost"
+                    ? "bg-yellow-600"
+                    : "bg-blue-600"
+                }`}
+              >
+                {item.status}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex justify-center gap-2 mt-8">
+          {Array.from({ length: totalPages }, (_, i) => (
+            <button
+              key={i}
+              className={`px-3 py-1 rounded ${
+                page === i + 1
+                  ? "bg-ubGold text-black"
+                  : "bg-gray-800 text-gray-300"
+              }`}
+              onClick={() => setPage(i + 1)}
+            >
+              {i + 1}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Modal */}
+      {showModal && selectedItem && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center px-4 z-50">
+          <div className="bg-gray-900 border border-gray-700 rounded-lg p-6 max-w-lg w-full relative">
+
+            <button
+              className="absolute top-3 right-3 text-gray-400 hover:text-white"
+              onClick={() => setShowModal(false)}
+            >
+              ✕
+            </button>
+
+            <h2 className="text-2xl font-bold text-ubGold mb-3">
+              {selectedItem.name}
+            </h2>
+
+            <p className="text-gray-300 mb-2">
+              Current Storage:  
+              <span className="text-white"> {selectedItem.location || "N/A"}</span>
+            </p>
+
+            <input
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded text-white"
+              placeholder="Update storage location…"
+              value={newStorage}
+              onChange={(e) => setNewStorage(e.target.value)}
+            />
+
+            <div className="flex justify-end gap-3 mt-5">
+              <button
+                onClick={updateStorage}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-white"
+              >
+                Update Storage
+              </button>
+
+              <button
+                onClick={() => markAsClaimed(selectedItem.id)}
+                className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded text-white"
+              >
+                Mark as Claimed
+              </button>
+
+              <button
+                onClick={() => deleteItem(selectedItem.id)}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 rounded text-white"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

@@ -10,6 +10,9 @@ import { supabase } from "@/lib/supabaseClient";
 import ThemeToggle from "./ThemeToggle";
 import { useSupabaseAuth } from "@/components/SupabaseProvider";
 
+/* ================================
+   🔗 Reusable Navigation Link
+================================ */
 function NavLink({
   href,
   children,
@@ -35,6 +38,8 @@ function NavLink({
       }`}
     >
       {children}
+
+      {/* 🔴 Unread badge */}
       {badgeCount > 0 && (
         <span className="absolute -top-1 -right-1 bg-red-600 text-white text-xs font-bold px-1.5 py-0.5 rounded-full">
           {badgeCount > 9 ? "9+" : badgeCount}
@@ -44,17 +49,24 @@ function NavLink({
   );
 }
 
+/* ===============================
+   🧭 MAIN NAVBAR COMPONENT
+================================ */
 export default function Navbar() {
   const router = useRouter();
   const { user, loading } = useSupabaseAuth();
+
   const [menuOpen, setMenuOpen] = useState(false);
   const [isManualAdmin, setIsManualAdmin] = useState(false);
+  const [role, setRole] = useState<string | null>(null);
+
+  const [unreadCount, setUnreadCount] = useState<number>(0);
   const [scrolled, setScrolled] = useState(false);
   const [toast, setToast] = useState("");
-  const [role, setRole] = useState<string | null>(null);
-  const [unreadCount, setUnreadCount] = useState<number>(0);
 
-  // 🧠 Determine role from Supabase profiles
+  /* ============================
+     👑 Detect User Role
+  ============================ */
   useEffect(() => {
     async function fetchUserRole() {
       const { data: authData } = await supabase.auth.getUser();
@@ -74,17 +86,19 @@ export default function Navbar() {
       } else {
         const storedRole = localStorage.getItem("userRole");
         const adminFlag = localStorage.getItem("isManualAdmin");
+
         if (storedRole) setRole(storedRole);
         if (adminFlag) setIsManualAdmin(true);
       }
     }
-
-    fetchUserRole();
+    void fetchUserRole();
   }, []);
 
-  // 🧾 Fetch unread messages for user claims
+  /* ============================
+     🔔 Fetch unread messages
+  ============================ */
   useEffect(() => {
-    async function fetchUnreadMessages() {
+    async function fetchUnread() {
       if (!user) return;
 
       const { data: claims } = await supabase
@@ -98,6 +112,7 @@ export default function Navbar() {
       }
 
       const claimIds = claims.map((c) => c.id);
+
       const { count } = await supabase
         .from("messages")
         .select("*", { count: "exact", head: true })
@@ -107,59 +122,65 @@ export default function Navbar() {
       setUnreadCount(count || 0);
     }
 
-    fetchUnreadMessages();
+    void fetchUnread();
 
-    // 🔥 realtime
-    const channel = supabase
-      .channel("messages_changes")
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "messages" },
-        (payload) => {
-          if (payload.new.is_admin) {
-            setUnreadCount((prev) => prev + 1);
-          }
+    // create the channel object first so we don't end up returning a Promise from the cleanup
+    const channel = supabase.channel("messages_changes");
+    channel.on(
+      "postgres_changes",
+      { event: "INSERT", schema: "public", table: "messages" },
+      (payload) => {
+        if (payload.new.is_admin) {
+          setUnreadCount((prev) => prev + 1);
         }
-      )
-      .subscribe();
+      }
+    );
+
+    // subscribe but don't return the resulting Promise from the effect
+    void channel.subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      // call removeChannel but don't return its Promise
+      void supabase.removeChannel(channel);
     };
   }, [user]);
 
-  // 🪟 Scroll effect
+  /* ============================
+     🪟 Scroll Effect
+  ============================ */
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      const handleScroll = () => setScrolled(window.scrollY > 10);
-      window.addEventListener("scroll", handleScroll);
-      return () => window.removeEventListener("scroll", handleScroll);
-    }
+    const onScroll = () => setScrolled(window.scrollY > 10);
+    window.addEventListener("scroll", onScroll);
+    return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
-  // 🚪 Logout
+  /* ============================
+     🚪 Logout
+  ============================ */
   const handleLogout = async () => {
-    try {
-      localStorage.removeItem("isManualAdmin");
-      localStorage.removeItem("userRole");
-      setIsManualAdmin(false);
-      setRole(null);
-      await supabase.auth.signOut();
+    localStorage.removeItem("isManualAdmin");
+    localStorage.removeItem("userRole");
+    setIsManualAdmin(false);
+    setRole(null);
 
-      setToast("✅ You’ve been logged out");
-      setTimeout(() => {
-        setToast("");
-        router.push("/login");
-      }, 1200);
-    } catch (err) {
-      console.error("Logout error:", err);
-    }
+    await supabase.auth.signOut();
+
+    setToast("✅ Logged out");
+
+    setTimeout(() => {
+      setToast("");
+      router.push("/login");
+    }, 1000);
   };
 
   const userEmail = user?.email || "User";
   const userName = userEmail.split("@")[0];
+
   const isAdmin = role === "admin" || isManualAdmin;
 
+  /* =============================
+     🟡 Navbar UI
+  ============================= */
   return (
     <header
       className={`sticky top-0 z-[1000] w-full transition-all duration-300 ${
@@ -169,61 +190,68 @@ export default function Navbar() {
       }`}
     >
       <div className="max-w-7xl mx-auto flex items-center justify-between px-4 sm:px-6 lg:px-8">
-        {/* 🐾 Logo */}
+
+        {/* 📌 Logo */}
         <Link href="/" className="flex items-center gap-2">
           <Image
             src="/logo.png"
-            alt="Jaguar Track Logo"
             width={38}
             height={38}
+            alt="Jaguar Track Logo"
             className="rounded-full"
           />
-          <span className="text-base md:text-lg font-bold text-gray-800 dark:text-gray-100 whitespace-nowrap">
+          <span className="text-base md:text-lg font-bold text-gray-800 dark:text-gray-100">
             Jaguar Track Lost & Found
           </span>
         </Link>
 
         {/* 🌐 Desktop Navigation */}
-        <nav className="hidden md:flex gap-6 font-medium items-center relative">
+        <nav className="hidden md:flex gap-6 font-medium items-center">
+
           <NavLink href="/">Home</NavLink>
 
-          {/* 👤 User */}
+          {/* 👤 USER */}
           {user && !isAdmin && (
             <>
               <NavLink href="/items">Items</NavLink>
               <NavLink href="/report">Report</NavLink>
+
               <NavLink href="/user/claims" badgeCount={unreadCount}>
                 My Claims
               </NavLink>
             </>
           )}
 
-          {/* 🧑‍💼 Admin */}
+          {/* 🧑‍💼 ADMIN */}
           {isAdmin && (
             <>
               <NavLink href="/reports">Reports</NavLink>
               <NavLink href="/admin">Admin</NavLink>
               <NavLink href="/admin/claims">Claims</NavLink>
 
-              {/* ⭐ NEW — Logs */}
+              {/* ⭐ NEW: STORAGE PAGE */}
+              <NavLink href="/admin/storage">Storage</NavLink>
+
+              {/* ⭐ NEW: Logs */}
               <NavLink href="/admin/logs">Logs</NavLink>
             </>
           )}
 
           <ThemeToggle />
 
-          {/* 👋 User Info */}
+          {/* Greeting + Logout */}
           {!loading && (user || isAdmin) ? (
             <div className="flex items-center gap-3">
-              <span className="text-sm text-gray-700 dark:text-gray-300">
+              <span className="text-sm dark:text-gray-300 text-gray-700">
                 Hi,{" "}
                 <span className="font-semibold">
                   {isAdmin ? "Admin" : userName}
                 </span>
               </span>
+
               <button
                 onClick={handleLogout}
-                className="bg-red-600 dark:bg-red-700 text-white px-3 py-1 rounded-md hover:bg-red-700 dark:hover:bg-red-600 transition"
+                className="bg-red-600 dark:bg-red-700 text-white px-3 py-1 rounded-md"
               >
                 Logout
               </button>
@@ -231,7 +259,7 @@ export default function Navbar() {
           ) : (
             <Link
               href="/login"
-              className="bg-blue-600 dark:bg-ubGold text-white dark:text-gray-900 px-3 py-1 rounded-md hover:bg-blue-500 dark:hover:bg-yellow-400 transition"
+              className="bg-blue-600 dark:bg-ubGold text-white dark:text-gray-900 px-3 py-1 rounded-md"
             >
               Login
             </Link>
@@ -240,7 +268,6 @@ export default function Navbar() {
 
         {/* 📱 Mobile Menu Button */}
         <button
-          aria-label="Open menu"
           className="md:hidden p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
           onClick={() => setMenuOpen(true)}
         >
@@ -248,25 +275,24 @@ export default function Navbar() {
         </button>
       </div>
 
-      {/* 📱 Mobile Drawer */}
+      {/* 📱 MOBILE DRAWER */}
       <AnimatePresence>
         {menuOpen && (
           <>
             <motion.div
+              className="fixed inset-0 bg-black/50 z-40"
               initial={{ opacity: 0 }}
               animate={{ opacity: 0.5 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black z-40"
               onClick={() => setMenuOpen(false)}
             />
+
             <motion.div
+              className="fixed top-0 left-0 h-full w-64 bg-white dark:bg-gray-900 shadow-lg z-50 flex flex-col"
               initial={{ x: "-100%" }}
               animate={{ x: 0 }}
               exit={{ x: "-100%" }}
-              transition={{ type: "tween", duration: 0.3 }}
-              className="fixed top-0 left-0 h-full w-64 bg-white dark:bg-gray-900 dark:text-gray-100 shadow-lg z-50 flex flex-col"
             >
-              <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
+              <div className="flex items-center justify-between p-4">
                 <span className="font-bold text-lg">Menu</span>
                 <button onClick={() => setMenuOpen(false)}>
                   <X size={26} />
@@ -278,6 +304,7 @@ export default function Navbar() {
                   Home
                 </NavLink>
 
+                {/* USER */}
                 {!isAdmin && user && (
                   <>
                     <NavLink href="/items" onClick={() => setMenuOpen(false)}>
@@ -296,6 +323,7 @@ export default function Navbar() {
                   </>
                 )}
 
+                {/* ADMIN */}
                 {isAdmin && (
                   <>
                     <NavLink href="/reports" onClick={() => setMenuOpen(false)}>
@@ -304,26 +332,42 @@ export default function Navbar() {
                     <NavLink href="/admin" onClick={() => setMenuOpen(false)}>
                       Admin
                     </NavLink>
-                    <NavLink href="/admin/claims" onClick={() => setMenuOpen(false)}>
+                    <NavLink
+                      href="/admin/claims"
+                      onClick={() => setMenuOpen(false)}
+                    >
                       Claims
                     </NavLink>
 
-                    {/* ⭐ NEW — Logs */}
-                    <NavLink href="/admin/logs" onClick={() => setMenuOpen(false)}>
+                    {/* ⭐ NEW: STORAGE */}
+                    <NavLink
+                      href="/admin/storage"
+                      onClick={() => setMenuOpen(false)}
+                    >
+                      Storage
+                    </NavLink>
+
+                    {/* ⭐ NEW: LOGS */}
+                    <NavLink
+                      href="/admin/logs"
+                      onClick={() => setMenuOpen(false)}
+                    >
                       Logs
                     </NavLink>
                   </>
                 )}
 
-                <div className="pt-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                {/* Bottom section */}
+                <div className="pt-4 border-t flex items-center justify-between">
                   <ThemeToggle />
+
                   {!loading && (user || isAdmin) ? (
                     <button
                       onClick={() => {
                         handleLogout();
                         setMenuOpen(false);
                       }}
-                      className="bg-red-600 dark:bg-red-700 text-white px-3 py-1 rounded hover:bg-red-700 dark:hover:bg-red-600 transition"
+                      className="bg-red-600 text-white px-3 py-1 rounded"
                     >
                       Logout
                     </button>
@@ -331,7 +375,7 @@ export default function Navbar() {
                     <Link
                       href="/login"
                       onClick={() => setMenuOpen(false)}
-                      className="bg-blue-600 dark:bg-ubGold text-white dark:text-gray-900 px-3 py-1 rounded hover:bg-blue-500 dark:hover:bg-yellow-400 transition text-center"
+                      className="bg-blue-600 text-white px-3 py-1 rounded text-center"
                     >
                       Login
                     </Link>
@@ -347,10 +391,9 @@ export default function Navbar() {
       <AnimatePresence>
         {toast && (
           <motion.div
-            initial={{ opacity: 0, y: 50 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 50 }}
             className="fixed bottom-6 right-6 bg-green-600 text-white px-4 py-2 rounded-lg shadow-lg z-[2000]"
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
           >
             {toast}
           </motion.div>
