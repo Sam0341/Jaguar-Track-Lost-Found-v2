@@ -65,7 +65,6 @@ body {
   height: 100%;
 }
 
-/* ✅ Tailwind apply comes after custom keyframes */
 body {
   @apply bg-gray-50 text-gray-900 dark:bg-gray-950 dark:text-gray-100 transition-colors duration-500;
 }
@@ -108,7 +107,7 @@ body {
 }
 
 /* ----------------------------------------- */
-/* 🔹 Scrollbar Styling (optional aesthetic) */
+/* 🔹 Scrollbar Styling */
 /* ----------------------------------------- */
 ::-webkit-scrollbar {
   width: 8px;
@@ -119,7 +118,7 @@ body {
   border-radius: 8px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #f5c400; /* UB Gold */
+  background: #f5c400;
 }
 ::-webkit-scrollbar-track {
   background: #1e1e1e;
@@ -155,4 +154,78 @@ body {
 .chat-panel {
   @apply w-full sm:w-[420px] h-full bg-gray-900 text-white flex flex-col shadow-2xl;
   border-left: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* ----------------------------------------- */
+/* 🔹 Modern Report Form Styles */
+/* ----------------------------------------- */
+
+.form-card {
+  @apply max-w-3xl mx-auto bg-white dark:bg-gray-900 
+  p-8 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-700
+  fade-in;
+}
+
+.form-section {
+  @apply grid grid-cols-1 md:grid-cols-2 gap-6 mt-4;
+}
+
+.form-input-wrapper {
+  @apply relative w-full;
+}
+
+.form-input {
+  @apply w-full p-3 pt-5 rounded-xl border bg-gray-50 dark:bg-gray-800
+  text-gray-900 dark:text-gray-100 border-gray-300 dark:border-gray-700
+  focus:ring-2 focus:ring-ubGold focus:border-ubGold
+  dark:focus:ring-ubGold/70 
+  outline-none transition;
+}
+
+/* floating label */
+.form-label {
+  @apply absolute left-3 top-1/2 -translate-y-1/2 
+  text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-900 
+  px-1 transition-all pointer-events-none;
+}
+
+.form-input.not-empty + .form-label,
+textarea.not-empty + .form-label {
+  @apply top-1 text-xs text-ubBlue dark:text-ubGold;
+}
+
+textarea.form-input {
+  @apply min-h-[110px] resize-none;
+}
+
+/* drag & drop */
+.dropzone {
+  @apply mt-6 p-5 border-2 border-dashed rounded-xl cursor-pointer
+  border-gray-300 dark:border-gray-700
+  hover:border-ubBlue hover:bg-ubBlue/5
+  dark:hover:border-ubGold dark:hover:bg-ubGold/10 
+  transition;
+}
+
+.dropzone.dragover {
+  @apply border-ubBlue dark:border-ubGold bg-ubBlue/10 dark:bg-ubGold/20;
+}
+
+.image-preview {
+  @apply w-full max-h-52 object-cover rounded-xl border
+  border-gray-300 dark:border-gray-700 shadow mt-3;
+}
+
+/* submit button */
+.submit-btn {
+  @apply w-full py-3 mt-6 rounded-xl font-semibold text-white
+  bg-gradient-to-r from-ubBlue to-blue-500 
+  dark:from-ubGold dark:to-yellow-500
+  hover:opacity-90 transition;
+}
+
+/* success popup */
+.popup-success {
+  @apply fixed bottom-6 right-6 bg-green-600 text-white 
+  px-6 py-3 rounded-xl shadow-xl animate-bounce z-[9999];
 }

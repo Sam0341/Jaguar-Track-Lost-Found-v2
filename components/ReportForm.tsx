@@ -19,11 +19,15 @@ export default function ReportForm() {
   const [reporterEmail, setReporterEmail] = useState("");
 
   const [image, setImage] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
 
   const [message, setMessage] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [successPopup, setSuccessPopup] = useState(false);
 
-  // Load categories, campuses, profile
+  const [loading, setLoading] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
+
+  /* LOAD DATA */
   useEffect(() => {
     async function load() {
       const { data: userData } = await supabase.auth.getUser();
@@ -41,24 +45,44 @@ export default function ReportForm() {
         setReporterName(profile?.full_name || "");
       }
 
-      const { data: cat } = await supabase.from("categories").select("*");
-      setCategories(cat || []);
-
-      const { data: camp } = await supabase.from("campuses").select("*");
-      setCampuses(camp || []);
+      setCategories((await supabase.from("categories").select("*")).data || []);
+      setCampuses((await supabase.from("campuses").select("*")).data || []);
     }
-
     load();
   }, []);
 
-  // Submit form
-  const handleSubmit = async (e: React.FormEvent) => {
+  /* DRAG & DROP HANDLERS */
+  function handleDrag(e: any) {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(true);
+  }
+
+  function handleDragLeave(e: any) {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+  }
+
+  function handleDrop(e: any) {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      setImage(file);
+      setImagePreview(URL.createObjectURL(file));
+    }
+  }
+
+  /* SUBMIT FORM */
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
     setMessage("");
 
     const { data: auth } = await supabase.auth.getUser();
-
     if (!auth?.user) {
       setMessage("⚠️ You must be logged in.");
       setLoading(false);
@@ -68,19 +92,19 @@ export default function ReportForm() {
     const success = await addItem({
       name: itemName,
       description,
-      location,       // ✅ FIXED — send location
+      location,
       status,
-      category: categoryId, // category_id
-      campus: campusId,     // campus_id
+      category: categoryId,
+      campus: campusId,
       userId: auth.user.id,
-
       reporterName,
       reporterEmail,
       imageFile: image,
     });
 
     if (success) {
-      setMessage("✅ Report submitted successfully!");
+      setSuccessPopup(true);
+      setTimeout(() => setSuccessPopup(false), 3000);
 
       setItemName("");
       setDescription("");
@@ -89,121 +113,172 @@ export default function ReportForm() {
       setCampusId("");
       setStatus("Lost");
       setImage(null);
+      setImagePreview(null);
     } else {
-      setMessage("❌ Failed to submit report. Try again.");
+      setMessage("❌ Failed to submit report.");
     }
 
     setLoading(false);
-  };
+  }
 
   return (
-    <form
-      onSubmit={handleSubmit}
-      className="max-w-2xl mx-auto bg-white dark:bg-gray-900 p-6 rounded-2xl shadow"
-    >
-      <h2 className="text-2xl font-bold text-center mb-4">
-        Submit Lost / Found Report
+    <div className="py-10 px-4">
+      <h2 className="text-3xl font-bold text-center mb-6">
+        Submit Lost or Found Report
       </h2>
 
-      <input
-        className="input"
-        placeholder="Item name"
-        value={itemName}
-        onChange={(e) => setItemName(e.target.value)}
-        required
-      />
+      <form onSubmit={handleSubmit} className="form-card">
+        {/* TWO COLUMN GRID */}
+        <div className="form-section">
 
-      <textarea
-        className="input h-24"
-        placeholder="Describe the item"
-        value={description}
-        onChange={(e) => setDescription(e.target.value)}
-        required
-      />
+          <div className="form-input-wrapper">
+            <input
+              className={`form-input ${itemName ? "not-empty" : ""}`}
+              value={itemName}
+              onChange={(e) => setItemName(e.target.value)}
+              required
+            />
+            <label className="form-label">Item Name</label>
+          </div>
 
-      {/* Category */}
-      <label>Category</label>
-      <select
-        className="input"
-        value={categoryId}
-        onChange={(e) => setCategoryId(e.target.value)}
-        required
-      >
-        <option value="">Select Category</option>
-        {categories.map((c) => (
-          <option key={c.id} value={c.id}>
-            {c.name}
-          </option>
-        ))}
-      </select>
+          <div className="form-input-wrapper">
+            <select
+              className={`form-input ${status ? "not-empty" : ""}`}
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+            >
+              <option>Lost</option>
+              <option>Found</option>
+            </select>
+            <label className="form-label">Status</label>
+          </div>
 
-      {/* Campus */}
-      <label>Campus</label>
-      <select
-        className="input"
-        value={campusId}
-        onChange={(e) => setCampusId(e.target.value)}
-        required
-      >
-        <option value="">Select Campus</option>
-        {campuses.map((c) => (
-          <option key={c.id} value={c.id}>
-            {c.name}
-          </option>
-        ))}
-      </select>
+          <div className="form-input-wrapper">
+            <select
+              className={`form-input ${categoryId ? "not-empty" : ""}`}
+              value={categoryId}
+              onChange={(e) => setCategoryId(e.target.value)}
+              required
+            >
+              <option value="">Select Category</option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+            <label className="form-label">Category</label>
+          </div>
 
-      {/* Location */}
-      <input
-        className="input"
-        placeholder="Location where it was lost/found"
-        value={location}
-        onChange={(e) => setLocation(e.target.value)}
-        required
-      />
+          <div className="form-input-wrapper">
+            <select
+              className={`form-input ${campusId ? "not-empty" : ""}`}
+              value={campusId}
+              onChange={(e) => setCampusId(e.target.value)}
+              required
+            >
+              <option value="">Select Campus</option>
+              {campuses.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+            <label className="form-label">Campus</label>
+          </div>
 
-      {/* Status */}
-      <select
-        className="input"
-        value={status}
-        onChange={(e) => setStatus(e.target.value)}
-      >
-        <option>Lost</option>
-        <option>Found</option>
-      </select>
+        </div>
 
-      {/* Reporter Info */}
-      <input
-        className="input"
-        placeholder="Your Name"
-        value={reporterName}
-        onChange={(e) => setReporterName(e.target.value)}
-      />
+        {/* Description */}
+        <div className="form-input-wrapper mt-4">
+          <textarea
+            className={`form-input h-28 resize-none ${
+              description ? "not-empty" : ""
+            }`}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            required
+          />
+          <label className="form-label">
+            Description (include when/where it was lost or found)
+          </label>
+        </div>
 
-      <input
-        className="input"
-        placeholder="Your UB Email"
-        value={reporterEmail}
-        onChange={(e) => setReporterEmail(e.target.value)}
-      />
+        {/* Location */}
+        <div className="form-input-wrapper">
+          <input
+            className={`form-input ${location ? "not-empty" : ""}`}
+            value={location}
+            onChange={(e) => setLocation(e.target.value)}
+            required
+          />
+          <label className="form-label">Location</label>
+        </div>
 
-      {/* Image */}
-      <input
-        type="file"
-        className="input"
-        accept="image/*"
-        onChange={(e) => setImage(e.target.files?.[0] ?? null)}
-      />
+        {/* Reporter Info */}
+        <div className="form-section">
+          <div className="form-input-wrapper">
+            <input
+              className={`form-input ${reporterName ? "not-empty" : ""}`}
+              value={reporterName}
+              onChange={(e) => setReporterName(e.target.value)}
+            />
+            <label className="form-label">Your Name</label>
+          </div>
 
-      <button
-        className="btn w-full mt-4 bg-blue-600 text-white"
-        type="submit"
-        disabled={loading}
-      >
-        {loading ? "Submitting..." : "Submit Report"}
-      </button>
+          <div className="form-input-wrapper">
+            <input
+              className={`form-input ${reporterEmail ? "not-empty" : ""}`}
+              value={reporterEmail}
+              onChange={(e) => setReporterEmail(e.target.value)}
+            />
+            <label className="form-label">Your UB Email</label>
+          </div>
+        </div>
 
-      {message && <p className="text-center mt-3">{message}</p>}
-    </form>
+        {/* DRAG & DROP UPLOAD */}
+        <div
+          className={`dropzone ${dragActive ? "dragover" : ""}`}
+          onDragOver={handleDrag}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          onClick={() => document.getElementById("file-input")?.click()}
+        >
+          <p className="text-center text-gray-500 dark:text-gray-300">
+            Drag & drop an image here or click to upload
+          </p>
+        </div>
+
+        <input
+          type="file"
+          id="file-input"
+          className="hidden"
+          accept="image/*"
+          onChange={(e) => {
+            const file = e.target.files?.[0] ?? null;
+            setImage(file);
+            if (file) setImagePreview(URL.createObjectURL(file));
+          }}
+        />
+
+        {imagePreview && <img src={imagePreview} className="image-preview" />}
+
+        <button className="submit-btn" disabled={loading}>
+          {loading ? "Submitting..." : "Submit Report"}
+        </button>
+
+        {message && (
+          <p className="text-center mt-4 text-red-500 dark:text-red-400">
+            {message}
+          </p>
+        )}
+      </form>
+
+      {successPopup && (
+        <div className="popup-success">
+          ✅ Report Submitted!
+        </div>
+      )}
+    </div>
   );
 }
