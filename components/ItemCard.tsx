@@ -1,75 +1,68 @@
-"use client";
+// /lib/items.ts
+import { supabase } from "@/lib/supabaseClient";
 
-import Link from "next/link";
-import type { Item } from "@/lib/items";
+export async function addItem(item: any) {
+  try {
+    // 1️⃣ Get category_id from category NAME
+    const { data: categoryRow } = await supabase
+      .from("categories")
+      .select("id")
+      .eq("name", item.category)
+      .maybeSingle();
 
-export default function ItemCard({ item }: { item: Item }) {
-  // Ensure image always has a valid fallback
-  const imgSrc =
-    item.image_url && item.image_url.trim() !== ""
-      ? item.image_url
-      : "https://placehold.co/600x400?text=No+Image+Available";
+    if (!categoryRow) {
+      throw new Error(`Category not found: ${item.category}`);
+    }
 
-  return (
-    <Link
-      href={`/items/${item.id}`}
-      className="block border rounded-2xl shadow-sm hover:shadow-md transition overflow-hidden bg-white dark:bg-gray-900"
-    >
-      {/* 🖼 Image */}
-      <div className="relative w-full h-48 bg-gray-100 dark:bg-gray-800 overflow-hidden rounded-t-2xl">
-        <img
-          src={imgSrc}
-          alt={item.name || "Item image"}
-          className="w-full h-full object-cover select-none pointer-events-none transition-transform duration-300 group-hover:scale-105"
-          draggable="false"
-          loading="lazy"
-          onError={(e) => {
-            (e.target as HTMLImageElement).src =
-              "https://placehold.co/600x400?text=Image+Unavailable";
-          }}
-        />
-      </div>
+    // 2️⃣ Get campus_id from campus NAME
+    const { data: campusRow } = await supabase
+      .from("campuses")
+      .select("id")
+      .eq("name", item.campus)
+      .maybeSingle();
 
-      {/* 📄 Info */}
-      <div className="p-4">
-        <h2 className="font-bold text-lg text-gray-900 dark:text-gray-100">
-          {item.name}
-        </h2>
+    if (!campusRow) {
+      throw new Error(`Campus not found: ${item.campus}`);
+    }
 
-        <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2">
-          {item.description}
-        </p>
+    // 3️⃣ Upload image if exists
+    let imagePath = null;
+    if (item.imageFile) {
+      const fileExt = item.imageFile.name.split(".").pop();
+      const fileName = `${Date.now()}.${fileExt}`;
 
-        {/* 🏷️ Tags */}
-        <div className="flex flex-wrap gap-2 mt-3 text-xs">
-          {/* STATUS */}
-          <span
-            className={`px-3 py-1 rounded-full ${
-              item.status?.toLowerCase() === "found"
-                ? "bg-green-100 text-green-700 dark:bg-green-800 dark:text-green-200"
-                : item.status?.toLowerCase() === "claimed"
-                ? "bg-yellow-200 text-yellow-800 dark:bg-yellow-700 dark:text-yellow-200"
-                : "bg-yellow-100 text-yellow-700 dark:bg-yellow-700 dark:text-yellow-200"
-            }`}
-          >
-            {item.status?.toUpperCase()}
-          </span>
+      const { error: uploadError } = await supabase.storage
+        .from("item-photos")
+        .upload(fileName, item.imageFile, {
+          upsert: false,
+        });
 
-          {/* CATEGORY */}
-          {item.category && (
-            <span className="bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 px-3 py-1 rounded-full">
-              {item.category}
-            </span>
-          )}
+      if (uploadError) throw uploadError;
 
-          {/* CAMPUS */}
-          {item.campus && (
-            <span className="bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-200 px-3 py-1 rounded-full">
-              {item.campus}
-            </span>
-          )}
-        </div>
-      </div>
-    </Link>
-  );
+      imagePath = fileName;
+    }
+
+    // 4️⃣ Insert item
+    const { error: insertError } = await supabase.from("items").insert({
+      name: item.name,
+      description: item.description,
+      location: item.location,
+      status: item.status,
+      reporter_name: item.reporterName,
+      reporter_email: item.reporterEmail,
+      reported_by: item.userId,
+      reported_at: new Date().toISOString(),
+      image: imagePath,
+      category_id: categoryRow.id,
+      campus_id: campusRow.id,
+    });
+
+    if (insertError) throw insertError;
+
+    return true;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("❌ Error adding item:", message);
+    return false;
+  }
 }
