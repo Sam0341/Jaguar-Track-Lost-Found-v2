@@ -9,20 +9,28 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
   const [item, setItem] = useState<any>(null);
   const [user, setUser] = useState<any>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+
   const [claimStatus, setClaimStatus] = useState<string | null>(null);
   const [claimId, setClaimId] = useState<string | null>(null);
+
   const [claimMessage, setClaimMessage] = useState("");
   const [showClaimForm, setShowClaimForm] = useState(false);
   const [feedback, setFeedback] = useState("");
 
+  const [someoneElsePending, setSomeoneElsePending] = useState(false);
+
   const router = useRouter();
 
-  const PUBLIC_BUCKET =
+  const BUCKET =
     `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/item-photos`;
 
-  // Load everything
+  /* ===========================================================
+   * LOAD ITEM + USER + CLAIM STATES
+   * ===========================================================
+   */
   useEffect(() => {
-    async function loadData() {
+    async function load() {
+      // Load user
       const { data: sessionData } = await supabase.auth.getSession();
       const session = sessionData?.session;
       setUser(session?.user || null);
@@ -31,7 +39,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
         setIsAdmin(true);
       }
 
-      // Fetch item
+      // Load item
       const { data, error } = await supabase
         .from("items")
         .select(`
@@ -42,7 +50,6 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
           image,
           status,
           reported_at,
-
           campus:campus_id ( id, name ),
           category:category_id ( id, name ),
           reporter:reported_by ( id, full_name, email )
@@ -62,36 +69,75 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
           reporter_name: reporterObj?.full_name || "Unknown",
           reporter_email: reporterObj?.email || "",
           image_url: data.image
-            ? (data.image.startsWith("http") ? data.image : `${PUBLIC_BUCKET}/${data.image}`)
+            ? (data.image.startsWith("http") ? data.image : `${BUCKET}/${data.image}`)
             : null,
         });
       }
 
-      // Load user claim
+      /* ------------------------------------------------------------------
+       * 1. Load current user's claim (if any)
+       * ------------------------------------------------------------------
+       */
       if (session?.user) {
-        const { data: claim } = await supabase
+        const { data: myClaim } = await supabase
           .from("claims")
           .select("id, status")
           .eq("item_id", params.id)
           .eq("claimed_by", session.user.id)
           .maybeSingle();
 
-        if (claim) {
-          setClaimId(claim.id);
-          setClaimStatus(claim.status);
+        if (myClaim) {
+          setClaimId(myClaim.id);
+          setClaimStatus(myClaim.status);
+        }
+      }
+
+      /* ------------------------------------------------------------------
+       * 2. Check if ANY pending claim exists for this item from ANY user
+       * ------------------------------------------------------------------
+       */
+      const { data: pendingCheck } = await supabase
+        .from("claims")
+        .select("id, claimed_by")
+        .eq("item_id", params.id)
+        .eq("status", "pending");
+
+      if (pendingCheck && pendingCheck.length > 0) {
+        const pendingClaim = pendingCheck[0];
+
+        // If pending claim belongs to this user → normal flow
+        if (!session?.user || pendingClaim.claimed_by !== session.user.id) {
+          setSomeoneElsePending(true);
         }
       }
     }
 
-    loadData();
+    load();
   }, [params.id]);
 
-  // Submit claim
+  /* ===========================================================
+   * DATE FORMATTER
+   * ===========================================================
+   */
+  const formatDate = (ts: string) =>
+    new Date(ts).toLocaleString("en-US", {
+      weekday: "short",
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+
+  /* ===========================================================
+   * SUBMIT CLAIM
+   * ===========================================================
+   */
   const submitClaim = async (e: any) => {
     e.preventDefault();
     if (!user) return router.push("/login");
 
-    setFeedback("Submitting claim...");
+    setFeedback("Submitting claim…");
 
     const token = (await supabase.auth.getSession()).data.session?.access_token;
 
@@ -110,99 +156,121 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
     const result = await res.json();
 
     if (result.success) {
-      setClaimStatus("Pending");
-      setClaimId(result.claim_id);
+      setClaimStatus("pending");
       setFeedback("✔ Claim submitted!");
       setShowClaimForm(false);
     } else {
-      setFeedback("❌ Failed to submit claim.");
+      setFeedback(`❌ ${result.error || "Failed to submit claim."}`);
     }
   };
 
   if (!item) {
-    return (
-      <div className="text-center mt-10 text-gray-500 dark:text-gray-400">
-        Loading item details…
-      </div>
-    );
+    return <div className="text-center mt-10 text-gray-500">Loading item…</div>;
   }
 
+  const itemClaimed = item.status?.toLowerCase() === "claimed";
+
+  /* ===========================================================
+   * UI RENDER
+   * ===========================================================
+   */
   return (
-    <div className="max-w-7xl mx-auto p-6">
+    <div className="container mx-auto p-6 pb-20">
       <div className="grid md:grid-cols-2 gap-8">
 
-        {/* IMAGE SECTION — FIXED HEIGHT, NO MORE EMPTY BLOCK */}
-        <div className="rounded-xl overflow-hidden shadow bg-gray-200 dark:bg-gray-800">
+        {/* IMAGE */}
+        <div className="bg-gray-200 dark:bg-gray-800 rounded-xl overflow-hidden shadow">
           <img
             src={item.image_url || "https://placehold.co/600x400?text=No+Image"}
-            className="w-full h-[420px] object-cover"
+            className="w-full h-[360px] object-cover"
           />
         </div>
 
         {/* DETAILS */}
         <div className="bg-white dark:bg-gray-900 p-6 rounded-xl shadow border border-gray-200 dark:border-gray-700">
 
-          <h1 className="text-3xl font-bold mb-2 dark:text-white">{item.name}</h1>
-          <p className="text-gray-700 dark:text-gray-300">{item.description}</p>
+          <h1 className="text-3xl font-bold dark:text-white mb-2">
+            {item.name}
+          </h1>
+
+          <p className="text-gray-600 dark:text-gray-300 mb-3">
+            {item.description}
+          </p>
 
           {/* TAGS */}
-          <div className="flex flex-wrap gap-2 mt-4">
-            <span className="px-3 py-1 rounded-full bg-gray-700 text-white text-sm">{item.category}</span>
-            <span className="px-3 py-1 rounded-full bg-blue-700 text-white text-sm">{item.campus}</span>
-
-            <span
-              className={`px-3 py-1 rounded-full text-sm ${
-                item.status === "found"
-                  ? "bg-green-600 text-white"
-                  : "bg-yellow-500 text-black"
-              }`}
-            >
+          <div className="flex flex-wrap gap-2 mb-5">
+            <span className="badge bg-gray-700 text-white">{item.category}</span>
+            <span className="badge bg-blue-700 text-white">{item.campus}</span>
+            <span className="badge bg-yellow-500 text-black">
               {item.status.toUpperCase()}
             </span>
           </div>
 
           {/* REPORT INFO */}
-          <div className="mt-5 text-sm dark:text-gray-300 space-y-1">
+          <div className="text-sm dark:text-gray-300 space-y-1 mb-6">
             <p><strong>Reported by:</strong> {item.reporter_name}</p>
-            {isAdmin && <p><strong>Email:</strong> {item.reporter_email}</p>}
-            <p><strong>Reported At:</strong> {item.reported_at}</p>
-            <p><strong>Location:</strong> {item.location || "Not provided"}</p>
+            {isAdmin && (
+              <p><strong>Email:</strong> {item.reporter_email}</p>
+            )}
+            <p><strong>Reported at:</strong> {formatDate(item.reported_at)}</p>
+            <p><strong>Location:</strong> {item.location}</p>
           </div>
 
-          {/* CLAIM BUTTONS */}
-          {!claimStatus && (
+          {/* ===========================================================
+           * CLAIM LOGIC & UI
+           * ===========================================================
+           */
+
+          /* 🔥 BLOCK claim button if item is claimed */
+          itemClaimed && (
+            <p className="text-red-500 font-medium mb-3">
+              ❌ This item has already been fully claimed.
+            </p>
+          )}
+
+          {/* 🔥 BLOCK claim button if another user submitted a pending claim */
+          someoneElsePending && !claimStatus && !itemClaimed && (
+            <p className="text-yellow-500 font-medium mb-3">
+              ⚠️ Someone else is currently claiming this item.
+            </p>
+          )}
+
+          {/* YOUR CLAIM STATUS */}
+          {claimStatus === "pending" && (
+            <p className="text-yellow-400 font-medium mb-3">
+              🕒 Your claim is pending admin approval.
+            </p>
+          )}
+
+          {claimStatus === "approved" && (
+            <p className="text-green-500 font-medium mb-3">
+              ✔ Your claim has been approved!
+            </p>
+          )}
+
+          {/* SHOW CLAIM BUTTON ONLY IF ALLOWED */}
+          {!claimStatus && !itemClaimed && !someoneElsePending && (
             <button
               onClick={() => setShowClaimForm(!showClaimForm)}
-              className="mt-6 w-full bg-ubBlue text-white py-2 rounded-lg hover:opacity-80"
+              className="w-full bg-ubBlue text-white py-2 rounded-lg hover:opacity-80"
             >
               Claim This Item
             </button>
           )}
 
-          {claimStatus === "Pending" && (
-            <p className="mt-4 text-yellow-500 font-medium">
-              ⏳ Your claim is pending admin approval.
-            </p>
-          )}
-
-          {claimStatus === "Approved" && (
-            <p className="mt-4 text-green-500 font-medium">
-              ✔ Your claim was approved!
-            </p>
-          )}
-
+          {/* CLAIM FORM */}
           {showClaimForm && (
             <form onSubmit={submitClaim} className="mt-4">
               <textarea
                 rows={3}
-                placeholder="Optional message to admin"
+                placeholder="Optional message"
                 value={claimMessage}
                 onChange={(e) => setClaimMessage(e.target.value)}
                 className="w-full p-3 rounded-lg border dark:bg-gray-800 dark:text-white"
               />
               <button
                 type="submit"
-                className="mt-3 w-full bg-green-700 text-white py-2 rounded-lg hover:opacity-90"
+                className="mt-3 w-full bg-green-700 text-white py-2 rounded-lg"
               >
                 Submit Claim
               </button>
@@ -210,20 +278,20 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
           )}
 
           {feedback && (
-            <p className="mt-3 text-center dark:text-white">{feedback}</p>
+            <p className="mt-3 text-center">{feedback}</p>
           )}
 
-          {/* NEW: Chat with Admin → Takes to My Claims */}
+          {/* CHAT LINK */}
           {claimId && (
             <Link
-              href="/user/claims"
-              className="mt-4 block text-center bg-ubGold py-2 rounded-lg font-bold hover:opacity-90"
+              href={`/user/chat/${claimId}`}
+              className="mt-4 block text-center bg-ubGold py-2 rounded-lg font-bold"
             >
               💬 Chat with Admin
             </Link>
           )}
 
-          <Link href="/items" className="mt-6 inline-block text-blue-600 dark:text-blue-400">
+          <Link href="/items" className="block mt-6 text-blue-500">
             ← Back to Items
           </Link>
         </div>
