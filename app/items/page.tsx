@@ -1,4 +1,4 @@
-'use client';
+"use client";
 
 export const runtime = "nodejs";
 
@@ -17,7 +17,7 @@ export default function ItemsPage() {
 
   const router = useRouter();
 
-  // 🧠 Check for login status
+  // 🔐 Check login
   useEffect(() => {
     async function checkAuth() {
       const { data: { session } } = await supabase.auth.getSession();
@@ -26,7 +26,7 @@ export default function ItemsPage() {
     checkAuth();
   }, []);
 
-  // 📦 Fetch items (NEW DB FORMAT)
+  // 📦 Fetch items with relations
   useEffect(() => {
     async function fetchItems() {
       try {
@@ -39,23 +39,9 @@ export default function ItemsPage() {
             image,
             status,
             reported_at,
-            claimed_at,
-
-            campus:campus_id (
-              id,
-              name
-            ),
-
-            category:category_id (
-              id,
-              name
-            ),
-
-            reporter:reported_by (
-              id,
-              full_name,
-              email
-            )
+            campus:campus_id ( id, name ),
+            category:category_id ( id, name ),
+            reporter:reported_by ( id, full_name, email )
           `)
           .order("reported_at", { ascending: false });
 
@@ -63,17 +49,30 @@ export default function ItemsPage() {
           console.error("❌ Supabase Fetch Error:", error);
         }
 
-        // Transform into UI structure
-        const mapped = data?.map((item: any) => ({
-          ...item,
-          campus: item.campus?.name || "Unknown Campus",
-          category: item.category?.name || "Other",
-          image_url: item.image || null,
-        })) || [];
+        const PUBLIC_BUCKET =
+          `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/item-photos`;
+
+        // 🔄 Convert to UI structure
+        const mapped =
+          data?.map((item: any) => {
+            const fullImage =
+              item.image?.startsWith("http")
+                ? item.image
+                : item.image
+                ? `${PUBLIC_BUCKET}/${item.image}`
+                : null;
+
+            return {
+              ...item,
+              campus: item.campus?.name || "Unknown Campus",
+              category: item.category?.name || "Other",
+              image_url: fullImage,
+            };
+          }) || [];
 
         setItems(mapped);
       } catch (err) {
-        console.error("❌ Unexpected Fetch Error:", err);
+        console.error("❌ Unexpected error:", err);
       } finally {
         setLoading(false);
       }
@@ -82,7 +81,7 @@ export default function ItemsPage() {
     fetchItems();
   }, []);
 
-  // 🔍 Filters
+  // 🔎 Searching & Filtering
   const filteredItems = items.filter((item) => {
     const matchesSearch =
       item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -97,7 +96,7 @@ export default function ItemsPage() {
     return matchesSearch && matchesCampus && matchesCategory;
   });
 
-  // ⏳ Loading UI
+  // Loading state
   if (loading) {
     return (
       <div className="text-center p-6 text-ubBlue dark:text-ubGold text-lg animate-pulse">
@@ -106,7 +105,6 @@ export default function ItemsPage() {
     );
   }
 
-  // ❌ No items
   if (filteredItems.length === 0) {
     return (
       <div className="text-center p-10 text-gray-500 dark:text-gray-400 text-lg">
@@ -121,21 +119,20 @@ export default function ItemsPage() {
         Lost & Found Items
       </h1>
 
-      {/* 🔍 Filters */}
+      {/* Filters */}
       <div className="flex flex-col md:flex-row justify-center gap-4 mb-8">
         <input
           type="text"
           placeholder="Search by name or description..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          className="border border-ubBlue dark:border-ubGold bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 p-2 rounded-lg w-full md:w-1/3 focus:ring-2 focus:ring-ubGold transition"
+          className="border border-ubBlue dark:border-ubGold bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 p-2 rounded-lg w-full md:w-1/3"
         />
 
-        {/* Dynamic Categories */}
         <select
           value={categoryFilter}
           onChange={(e) => setCategoryFilter(e.target.value)}
-          className="border border-ubBlue dark:border-ubGold bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 p-2 rounded-lg w-full md:w-1/4 focus:ring-2 focus:ring-ubGold transition"
+          className="border border-ubBlue dark:border-ubGold bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 p-2 rounded-lg w-full md:w-1/4"
         >
           <option>All Categories</option>
           {Array.from(new Set(items.map((i) => i.category))).map((cat) => (
@@ -143,11 +140,10 @@ export default function ItemsPage() {
           ))}
         </select>
 
-        {/* Dynamic Campuses */}
         <select
           value={campusFilter}
           onChange={(e) => setCampusFilter(e.target.value)}
-          className="border border-ubBlue dark:border-ubGold bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 p-2 rounded-lg w-full md:w-1/4 focus:ring-2 focus:ring-ubGold transition"
+          className="border border-ubBlue dark:border-ubGold bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 p-2 rounded-lg w-full md:w-1/4"
         >
           <option>All Campuses</option>
           {Array.from(new Set(items.map((i) => i.campus))).map((camp) => (
@@ -156,59 +152,66 @@ export default function ItemsPage() {
         </select>
       </div>
 
-      {/* 🧾 Items Grid */}
+      {/* ITEMS GRID */}
       <div className="grid sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
         {filteredItems.map((item) => (
           <div
             key={item.id}
-            className="bg-white dark:bg-gray-900 shadow-sm rounded-2xl border border-gray-200 dark:border-gray-700 hover:shadow-lg hover:border-ubGold transition overflow-hidden group"
+            className="bg-white dark:bg-gray-900 shadow rounded-2xl border dark:border-gray-700 hover:shadow-lg hover:border-ubGold transition overflow-hidden group"
           >
-            <div className="h-48 bg-gray-100 dark:bg-gray-800 flex items-center justify-center relative overflow-hidden">
+            {/* IMAGE */}
+            <div className="h-48 bg-gray-200 dark:bg-gray-800 relative overflow-hidden">
               <img
                 src={
                   item.image_url ||
                   "https://placehold.co/600x400?text=No+Image"
                 }
                 alt={item.name}
-                className="object-cover w-full h-full group-hover:scale-105 transition-all"
+                className="object-cover w-full h-full group-hover:scale-105 transition"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src =
+                    "https://placehold.co/600x400?text=Image+Unavailable";
+                }}
               />
             </div>
 
+            {/* Text */}
             <div className="p-4 flex flex-col justify-between min-h-[180px]">
               <div>
                 <h2 className="font-bold text-lg text-gray-900 dark:text-gray-100">
                   {item.name}
                 </h2>
-
-                <p className="text-gray-600 dark:text-gray-400 text-sm mb-2 line-clamp-2">
+                <p className="text-gray-600 dark:text-gray-400 text-sm line-clamp-2 mb-2">
                   {item.description}
                 </p>
 
+                {/* Tags */}
                 <div className="flex flex-wrap gap-2 mb-2">
                   <span
-                    className={`text-xs font-semibold px-2 py-1 rounded-full ${
+                    className={`text-xs px-2 py-1 rounded-full ${
                       item.status?.toLowerCase() === "found"
-                        ? "bg-green-100 text-green-700 dark:bg-green-800 dark:text-green-200"
-                        : "bg-yellow-100 text-yellow-700 dark:bg-yellow-700 dark:text-yellow-200"
+                        ? "bg-green-100 text-green-700"
+                        : "bg-yellow-200 text-yellow-800"
                     }`}
                   >
                     {item.status?.toUpperCase()}
                   </span>
 
-                  <span className="text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 px-2 py-1 rounded-full">
+                  <span className="text-xs bg-gray-200 dark:bg-gray-700 px-2 py-1 rounded-full">
                     {item.category}
                   </span>
 
-                  <span className="text-xs bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-200 px-2 py-1 rounded-full">
+                  <span className="text-xs bg-blue-200 dark:bg-blue-900 px-2 py-1 rounded-full">
                     {item.campus}
                   </span>
                 </div>
               </div>
 
-              <div className="mt-auto">
+              {/* Button */}
+              <div>
                 <Link
                   href={`/items/${item.id}`}
-                  className="block w-full text-center bg-ubBlue hover:bg-ubBlue/80 text-white text-sm font-medium py-2 rounded-lg transition"
+                  className="block w-full text-center bg-ubBlue hover:bg-ubBlue/80 text-white py-2 rounded-lg"
                 >
                   View Details
                 </Link>
