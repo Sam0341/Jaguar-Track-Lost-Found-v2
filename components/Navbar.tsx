@@ -61,7 +61,6 @@ export default function Navbar() {
       const authUser = authData?.user;
 
       if (authUser?.email) {
-        // Load role from profiles
         const { data: profile } = await supabase
           .from("profiles")
           .select("role")
@@ -73,7 +72,6 @@ export default function Navbar() {
           localStorage.setItem("userRole", profile.role);
         }
       } else {
-        // Check localStorage fallback (manual admin login)
         const storedRole = localStorage.getItem("userRole");
         const adminFlag = localStorage.getItem("isManualAdmin");
         if (storedRole) setRole(storedRole);
@@ -104,14 +102,14 @@ export default function Navbar() {
         .from("messages")
         .select("*", { count: "exact", head: true })
         .in("claim_id", claimIds)
-        .eq("is_admin", true); // Messages from admin
+        .eq("is_admin", true);
 
       setUnreadCount(count || 0);
     }
 
     fetchUnreadMessages();
 
-    // Realtime updates
+    // 🔥 realtime
     const channel = supabase
       .channel("messages_changes")
       .on(
@@ -130,7 +128,7 @@ export default function Navbar() {
     };
   }, [user]);
 
-  // 🪟 Detect scrolling for shadow effect
+  // 🪟 Scroll effect
   useEffect(() => {
     if (typeof window !== "undefined") {
       const handleScroll = () => setScrolled(window.scrollY > 10);
@@ -189,7 +187,7 @@ export default function Navbar() {
         <nav className="hidden md:flex gap-6 font-medium items-center relative">
           <NavLink href="/">Home</NavLink>
 
-          {/* 👤 Regular Users */}
+          {/* 👤 User */}
           {user && !isAdmin && (
             <>
               <NavLink href="/items">Items</NavLink>
@@ -200,19 +198,21 @@ export default function Navbar() {
             </>
           )}
 
-          {/* 🧑‍💼 Admin Users */}
+          {/* 🧑‍💼 Admin */}
           {isAdmin && (
             <>
               <NavLink href="/reports">Reports</NavLink>
               <NavLink href="/admin">Admin</NavLink>
               <NavLink href="/admin/claims">Claims</NavLink>
+
+              {/* ⭐ NEW — Logs */}
+              <NavLink href="/admin/logs">Logs</NavLink>
             </>
           )}
 
-          {/* 🌙 Theme Toggle */}
           <ThemeToggle />
 
-          {/* 👋 User Info + Logout */}
+          {/* 👋 User Info */}
           {!loading && (user || isAdmin) ? (
             <div className="flex items-center gap-3">
               <span className="text-sm text-gray-700 dark:text-gray-300">
@@ -304,11 +304,13 @@ export default function Navbar() {
                     <NavLink href="/admin" onClick={() => setMenuOpen(false)}>
                       Admin
                     </NavLink>
-                    <NavLink
-                      href="/admin/claims"
-                      onClick={() => setMenuOpen(false)}
-                    >
+                    <NavLink href="/admin/claims" onClick={() => setMenuOpen(false)}>
                       Claims
+                    </NavLink>
+
+                    {/* ⭐ NEW — Logs */}
+                    <NavLink href="/admin/logs" onClick={() => setMenuOpen(false)}>
+                      Logs
                     </NavLink>
                   </>
                 )}
