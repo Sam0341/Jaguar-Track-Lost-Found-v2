@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import { addLog } from "@/lib/logs"; // ✅ log helper
 
 type Item = {
   id: string;
@@ -24,7 +25,10 @@ export default function AdminDashboard() {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [campusFilter, setCampusFilter] = useState("All");
-  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  const [toast, setToast] = useState<{
+    message: string;
+    type: "success" | "error";
+  } | null>(null);
 
   useEffect(() => {
     fetchItems();
@@ -38,8 +42,9 @@ export default function AdminDashboard() {
       .select("*")
       .order("reported_at", { ascending: false });
 
-    if (error) console.error("Error fetching items:", error);
-    else {
+    if (error) {
+      console.error("Error fetching items:", error);
+    } else {
       setItems(data || []);
       setFilteredItems(data || []);
     }
@@ -80,10 +85,14 @@ export default function AdminDashboard() {
         })
       : "—";
 
-  // 🟢 Mark as Claimed
+  // 🟢 Mark as Claimed + log
   async function markAsClaimed(itemId: string) {
     const confirmed = window.confirm("Mark this item as claimed?");
     if (!confirmed) return;
+
+    // who did it?
+    const { data: authData } = await supabase.auth.getUser();
+    const admin = authData?.user;
 
     const { error } = await supabase
       .from("items")
@@ -93,21 +102,34 @@ export default function AdminDashboard() {
     if (error) {
       showToast("Failed to update item", "error");
     } else {
+      // 🔥 write log entry
+      await addLog("item_claimed", itemId, admin?.id || "unknown");
+
       showToast("✅ Item marked as claimed!", "success");
       setShowModal(false);
       fetchItems();
     }
   }
 
-  // 🔴 Delete item
+  // 🔴 Delete item + log
   async function deleteItem(itemId: string) {
-    const confirmed = window.confirm("Are you sure you want to delete this item?");
+    const confirmed = window.confirm(
+      "Are you sure you want to delete this item?"
+    );
     if (!confirmed) return;
 
+    // who did it?
+    const { data: authData } = await supabase.auth.getUser();
+    const admin = authData?.user;
+
     const { error } = await supabase.from("items").delete().eq("id", itemId);
+
     if (error) {
       showToast("❌ Failed to delete item", "error");
     } else {
+      // 🔥 write log entry
+      await addLog("item_deleted", itemId, admin?.id || "unknown");
+
       showToast("🗑️ Item deleted successfully!", "success");
       setShowModal(false);
       fetchItems();
@@ -175,7 +197,9 @@ export default function AdminDashboard() {
       {loading ? (
         <p className="text-gray-500 text-center">Loading items...</p>
       ) : filteredItems.length === 0 ? (
-        <p className="text-gray-400 text-center">No items match your search.</p>
+        <p className="text-gray-400 text-center">
+          No items match your search.
+        </p>
       ) : (
         <>
           {/* Desktop Table */}
@@ -312,13 +336,15 @@ export default function AdminDashboard() {
               <strong>Status:</strong> {selectedItem.status}
             </p>
             <p className="text-sm text-gray-400 mb-1">
-              <strong>Reporter:</strong> {selectedItem.reporter_name || "Unknown"}
+              <strong>Reporter:</strong>{" "}
+              {selectedItem.reporter_name || "Unknown"}
             </p>
             <p className="text-sm text-gray-400 mb-1">
               <strong>Email:</strong> {selectedItem.reporter_email || "N/A"}
             </p>
             <p className="text-sm text-gray-400 mb-1">
-              <strong>Reported At:</strong> {formatDate(selectedItem.reported_at)}
+              <strong>Reported At:</strong>{" "}
+              {formatDate(selectedItem.reported_at)}
             </p>
             {selectedItem.description && (
               <p className="text-sm text-gray-300 mt-2 border-t border-gray-700 pt-2">

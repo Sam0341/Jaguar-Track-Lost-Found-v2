@@ -1,11 +1,11 @@
-import { supabase } from "./supabaseClient";
+import { supabase } from "@/lib/supabaseClient";
 
-export async function addLog(action: string, item_id: string, user_id: string | null) {
+export async function addLog(action: string, itemId: string, performedBy: string) {
   await supabase.from("logs").insert([
     {
       action,
-      item_id,
-      performed_by: user_id,
+      item_id: itemId,
+      performed_by: performedBy,
     },
   ]);
 }
