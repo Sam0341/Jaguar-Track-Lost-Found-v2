@@ -1,20 +1,20 @@
 'use client';
 
-export const runtime = "nodejs"; // ✅ prevents Edge runtime warnings
+export const runtime = "nodejs";
 
 import { useEffect, useState } from "react";
-import { getAllItems, type Item } from "@/lib/items";
 import { supabase } from "@/lib/supabaseClient";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 export default function ItemsPage() {
-  const [items, setItems] = useState<Item[]>([]);
+  const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<any>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [campusFilter, setCampusFilter] = useState("All Campuses");
   const [categoryFilter, setCategoryFilter] = useState("All Categories");
+
   const router = useRouter();
 
   // 🧠 Check for login status
@@ -26,15 +26,54 @@ export default function ItemsPage() {
     checkAuth();
   }, []);
 
-  // 📦 Fetch items
+  // 📦 Fetch items (NEW DB FORMAT)
   useEffect(() => {
     async function fetchItems() {
       try {
-        const data = await getAllItems();
-        console.log("📦 Items fetched:", data);
-        setItems(data);
-      } catch (error) {
-        console.error("❌ Failed to fetch items:", error);
+        const { data, error } = await supabase
+          .from("items")
+          .select(`
+            id,
+            name,
+            description,
+            image,
+            status,
+            reported_at,
+            claimed_at,
+
+            campus:campus_id (
+              id,
+              name
+            ),
+
+            category:category_id (
+              id,
+              name
+            ),
+
+            reporter:reported_by (
+              id,
+              full_name,
+              email
+            )
+          `)
+          .order("reported_at", { ascending: false });
+
+        if (error) {
+          console.error("❌ Supabase Fetch Error:", error);
+        }
+
+        // Transform into UI structure
+        const mapped = data?.map((item: any) => ({
+          ...item,
+          campus: item.campus?.name || "Unknown Campus",
+          category: item.category?.name || "Other",
+          image_url: item.image || null,
+        })) || [];
+
+        setItems(mapped);
+      } catch (err) {
+        console.error("❌ Unexpected Fetch Error:", err);
       } finally {
         setLoading(false);
       }
@@ -43,17 +82,22 @@ export default function ItemsPage() {
     fetchItems();
   }, []);
 
+  // 🔍 Filters
   const filteredItems = items.filter((item) => {
     const matchesSearch =
       item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       item.description.toLowerCase().includes(searchTerm.toLowerCase());
+
     const matchesCampus =
       campusFilter === "All Campuses" || item.campus === campusFilter;
+
     const matchesCategory =
       categoryFilter === "All Categories" || item.category === categoryFilter;
+
     return matchesSearch && matchesCampus && matchesCategory;
   });
 
+  // ⏳ Loading UI
   if (loading) {
     return (
       <div className="text-center p-6 text-ubBlue dark:text-ubGold text-lg animate-pulse">
@@ -62,6 +106,7 @@ export default function ItemsPage() {
     );
   }
 
+  // ❌ No items
   if (filteredItems.length === 0) {
     return (
       <div className="text-center p-10 text-gray-500 dark:text-gray-400 text-lg">
@@ -86,37 +131,32 @@ export default function ItemsPage() {
           className="border border-ubBlue dark:border-ubGold bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 p-2 rounded-lg w-full md:w-1/3 focus:ring-2 focus:ring-ubGold transition"
         />
 
+        {/* Dynamic Categories */}
         <select
           value={categoryFilter}
           onChange={(e) => setCategoryFilter(e.target.value)}
           className="border border-ubBlue dark:border-ubGold bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 p-2 rounded-lg w-full md:w-1/4 focus:ring-2 focus:ring-ubGold transition"
         >
           <option>All Categories</option>
-          <option>Books & Documents</option>
-          <option>Electronics</option>
-          <option>Clothing</option>
-          <option>Jewelry</option>
-          <option>Sports Equipment</option>
-          <option>Wallets & IDs</option>
-          <option>Bags</option>
-          <option>Other</option>
+          {Array.from(new Set(items.map((i) => i.category))).map((cat) => (
+            <option key={cat}>{cat}</option>
+          ))}
         </select>
 
+        {/* Dynamic Campuses */}
         <select
           value={campusFilter}
           onChange={(e) => setCampusFilter(e.target.value)}
           className="border border-ubBlue dark:border-ubGold bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 p-2 rounded-lg w-full md:w-1/4 focus:ring-2 focus:ring-ubGold transition"
         >
           <option>All Campuses</option>
-          <option>Belmopan (Central Campus)</option>
-          <option>Belize City</option>
-          <option>Central Farm</option>
-          <option>Punta Gorda</option>
-          <option>Toledo</option>
+          {Array.from(new Set(items.map((i) => i.campus))).map((camp) => (
+            <option key={camp}>{camp}</option>
+          ))}
         </select>
       </div>
 
-      {/* 🧾 Item Cards */}
+      {/* 🧾 Items Grid */}
       <div className="grid sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
         {filteredItems.map((item) => (
           <div
@@ -124,23 +164,13 @@ export default function ItemsPage() {
             className="bg-white dark:bg-gray-900 shadow-sm rounded-2xl border border-gray-200 dark:border-gray-700 hover:shadow-lg hover:border-ubGold transition overflow-hidden group"
           >
             <div className="h-48 bg-gray-100 dark:bg-gray-800 flex items-center justify-center relative overflow-hidden">
-              <div className="absolute inset-0 bg-gradient-to-r from-ubBlue/20 via-ubGold/40 to-ubBlue/20 animate-[shimmer_1.5s_infinite]" />
               <img
                 src={
                   item.image_url ||
-                  "https://placehold.co/600x400?text=No+Image+Available"
+                  "https://placehold.co/600x400?text=No+Image"
                 }
                 alt={item.name}
-                className="object-cover w-full h-full opacity-0 transition-all duration-700 group-hover:scale-105"
-                onLoad={(e) => {
-                  e.currentTarget.style.opacity = "1";
-                  const shimmer = e.currentTarget.previousSibling as HTMLElement;
-                  if (shimmer) shimmer.style.display = "none";
-                }}
-                onError={(e) => {
-                  (e.target as HTMLImageElement).src =
-                    "https://placehold.co/600x400?text=Image+Unavailable";
-                }}
+                className="object-cover w-full h-full group-hover:scale-105 transition-all"
               />
             </div>
 
@@ -149,6 +179,7 @@ export default function ItemsPage() {
                 <h2 className="font-bold text-lg text-gray-900 dark:text-gray-100">
                   {item.name}
                 </h2>
+
                 <p className="text-gray-600 dark:text-gray-400 text-sm mb-2 line-clamp-2">
                   {item.description}
                 </p>
@@ -164,17 +195,13 @@ export default function ItemsPage() {
                     {item.status?.toUpperCase()}
                   </span>
 
-                  {item.category && (
-                    <span className="text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 px-2 py-1 rounded-full">
-                      {item.category}
-                    </span>
-                  )}
+                  <span className="text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 px-2 py-1 rounded-full">
+                    {item.category}
+                  </span>
 
-                  {item.campus && (
-                    <span className="text-xs bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-200 px-2 py-1 rounded-full">
-                      {item.campus}
-                    </span>
-                  )}
+                  <span className="text-xs bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-200 px-2 py-1 rounded-full">
+                    {item.campus}
+                  </span>
                 </div>
               </div>
 
@@ -196,17 +223,6 @@ export default function ItemsPage() {
           </div>
         ))}
       </div>
-
-      <style jsx>{`
-        @keyframes shimmer {
-          0% {
-            transform: translateX(-100%);
-          }
-          100% {
-            transform: translateX(100%);
-          }
-        }
-      `}</style>
     </div>
   );
 }
