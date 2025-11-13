@@ -7,75 +7,83 @@ import { addItem } from "@/lib/items";
 export default function ReportForm() {
   const [itemName, setItemName] = useState("");
   const [description, setDescription] = useState("");
-  const [category, setCategory] = useState("");
-  const [campus, setCampus] = useState("");
-  const [location, setLocation] = useState(""); // ✅ New state
-  const [status, setStatus] = useState("found");
+  const [location, setLocation] = useState("");
+  const [status, setStatus] = useState("Lost");
+
+  const [categoryId, setCategoryId] = useState("");
+  const [campusId, setCampusId] = useState("");
+  const [categories, setCategories] = useState<any[]>([]);
+  const [campuses, setCampuses] = useState<any[]>([]);
+
   const [reporterName, setReporterName] = useState("");
   const [reporterEmail, setReporterEmail] = useState("");
+
   const [image, setImage] = useState<File | null>(null);
+
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // 🧠 Auto-fill user info
+  // 🔹 Load categories & campuses + auto-fill profile
   useEffect(() => {
-    async function fetchUserInfo() {
-      const { data: authData } = await supabase.auth.getUser();
-      const user = authData?.user;
+    async function load() {
+      const { data: userData } = await supabase.auth.getUser();
+      const user = userData?.user;
+
       if (user) {
         setReporterEmail(user.email || "");
+
         const { data: profile } = await supabase
           .from("profiles")
           .select("full_name")
           .eq("id", user.id)
           .single();
 
-        if (profile?.full_name) setReporterName(profile.full_name);
+        setReporterName(profile?.full_name || "");
       }
+
+      const { data: cat } = await supabase.from("categories").select("*");
+      setCategories(cat || []);
+
+      const { data: camp } = await supabase.from("campuses").select("*");
+      setCampuses(camp || []);
     }
-    fetchUserInfo();
+
+    load();
   }, []);
 
-  // 📨 Handle submit
+  // 📤 Submit
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setMessage("");
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      setMessage("⚠️ You must be logged in to submit a report.");
+    const { data: auth } = await supabase.auth.getUser();
+    if (!auth?.user) {
+      setMessage("⚠️ You must be logged in.");
       setLoading(false);
       return;
     }
 
-    const properStatus =
-      status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
-
     const success = await addItem({
       name: itemName,
       description,
-      category,
-      campus,
-      location, // ✅ Added location
-      status: properStatus,
-      userId: user.id,
-      imageFile: image,
+      status,
+      category: categoryId,
+      campus: campusId,
+      userId: auth.user.id,
       reporterName,
       reporterEmail,
-    } as any);
+      imageFile: image,
+    });
 
     if (success) {
       setMessage("✅ Report submitted successfully!");
       setItemName("");
       setDescription("");
-      setCategory("");
-      setCampus("");
-      setLocation(""); // ✅ Clear location
-      setStatus("lost");
+      setLocation("");
+      setCategoryId("");
+      setCampusId("");
+      setStatus("Lost");
       setImage(null);
     } else {
       setMessage("❌ Failed to submit report. Try again.");
@@ -87,159 +95,108 @@ export default function ReportForm() {
   return (
     <form
       onSubmit={handleSubmit}
-      className="max-w-2xl mx-auto p-6 bg-white dark:bg-gray-900 shadow-lg rounded-2xl space-y-5 transition-colors duration-300"
+      className="max-w-2xl mx-auto bg-white dark:bg-gray-900 p-6 rounded-2xl shadow"
     >
-      <h2 className="text-2xl font-bold text-center text-blue-700 dark:text-blue-400">
-        
-      </h2>
+      <h2 className="text-2xl font-bold text-center mb-4">Submit Lost / Found Report</h2>
 
       {/* Item Name */}
       <input
-        type="text"
+        className="input"
+        placeholder="Item name"
         value={itemName}
         onChange={(e) => setItemName(e.target.value)}
-        placeholder="Item name"
-        className="border dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 p-2 w-full rounded-lg focus:ring-2 focus:ring-blue-400 outline-none"
         required
       />
 
       {/* Description */}
       <textarea
+        className="input h-24"
+        placeholder="Describe the item"
         value={description}
         onChange={(e) => setDescription(e.target.value)}
-        placeholder="Description (include where or when it was lost/found)"
-        className="border dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 p-2 w-full rounded-lg h-24 focus:ring-2 focus:ring-blue-400 outline-none"
         required
       />
 
-      {/* Category Dropdown */}
-      <div>
-        <label className="block mb-1 font-medium text-gray-700 dark:text-gray-300">
-          Category
-        </label>
-        <select
-          value={category}
-          onChange={(e) => setCategory(e.target.value)}
-          className="border dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 p-2 w-full rounded-lg focus:ring-2 focus:ring-blue-400 outline-none"
-          required
-        >
-          <option value="">Select a category</option>
-          <option value="Books & Documents">📚 Books & Documents</option>
-          <option value="Electronics">💻 Electronics</option>
-          <option value="Clothing">👕 Clothing</option>
-          <option value="Jewelry">💍 Jewelry</option>
-          <option value="Sports Equipment">🏀 Sports Equipment</option>
-          <option value="Wallets & IDs">💳 Wallets & IDs</option>
-          <option value="Bags">🎒 Bags</option>
-          <option value="Other">🔖 Other</option>
-        </select>
-      </div>
+      {/* Category */}
+      <label>Category</label>
+      <select
+        className="input"
+        value={categoryId}
+        onChange={(e) => setCategoryId(e.target.value)}
+        required
+      >
+        <option value="">Select Category</option>
+        {categories.map((c) => (
+          <option key={c.id} value={c.id}>{c.name}</option>
+        ))}
+      </select>
 
-      {/* Campus Dropdown */}
-      <div>
-        <label className="block mb-1 font-medium text-gray-700 dark:text-gray-300">
-          Campus
-        </label>
-        <select
-          value={campus}
-          onChange={(e) => setCampus(e.target.value)}
-          className="border dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 p-2 w-full rounded-lg focus:ring-2 focus:ring-blue-400 outline-none"
-          required
-        >
-          <option value="">Select a campus</option>
-          <option value="Belmopan (Central Campus)">
-            Belmopan (Central Campus)
-          </option>
-          <option value="Belize City Campus">Belize City Campus</option>
-          <option value="Central Farm">Central Farm</option>
-          <option value="Punta Gorda">Punta Gorda</option>
-        </select>
-      </div>
+      {/* Campus */}
+      <label>Campus</label>
+      <select
+        className="input"
+        value={campusId}
+        onChange={(e) => setCampusId(e.target.value)}
+        required
+      >
+        <option value="">Select Campus</option>
+        {campuses.map((c) => (
+          <option key={c.id} value={c.id}>{c.name}</option>
+        ))}
+      </select>
 
-      {/* Location Field ✅ */}
-      <div>
-        <label className="block mb-1 font-medium text-gray-700 dark:text-gray-300">
-          Location
-        </label>
-        <input
-          type="text"
-          value={location}
-          onChange={(e) => setLocation(e.target.value)}
-          placeholder="e.g., Library, Cafeteria, ICT Lab, Bus Stop..."
-          className="border dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 p-2 w-full rounded-lg focus:ring-2 focus:ring-blue-400 outline-none"
-          required
-        />
-      </div>
+      {/* Location */}
+      <input
+        className="input"
+        placeholder="Location where it was lost/found"
+        value={location}
+        onChange={(e) => setLocation(e.target.value)}
+        required
+      />
 
-      {/* Status Dropdown */}
-      <div>
-        <label className="block mb-1 font-medium text-gray-700 dark:text-gray-300">
-          Status
-        </label>
-        <select
-          value={status}
-          onChange={(e) => setStatus(e.target.value)}
-          className="border dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 p-2 w-full rounded-lg focus:ring-2 focus:ring-blue-400 outline-none"
-          required
-        >
-          <option value="found">Found</option>
-          <option value="lost">Lost</option>
-        </select>
-      </div>
+      {/* Status */}
+      <select
+        className="input"
+        value={status}
+        onChange={(e) => setStatus(e.target.value)}
+      >
+        <option>Lost</option>
+        <option>Found</option>
+      </select>
 
-      {/* Name + Email Fields */}
-      <div className="flex flex-col sm:flex-row gap-4">
-        <input
-          type="text"
-          value={reporterName}
-          onChange={(e) => setReporterName(e.target.value)}
-          placeholder="Your name"
-          className="border dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 p-2 w-full rounded-lg focus:ring-2 focus:ring-blue-400 outline-none"
-        />
-        <input
-          type="email"
-          value={reporterEmail}
-          onChange={(e) => setReporterEmail(e.target.value)}
-          placeholder="Your UB email"
-          className="border dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 p-2 w-full rounded-lg focus:ring-2 focus:ring-blue-400 outline-none"
-        />
-      </div>
+      {/* Reporter Info */}
+      <input
+        className="input"
+        placeholder="Your Name"
+        value={reporterName}
+        onChange={(e) => setReporterName(e.target.value)}
+      />
 
-      {/* Image Upload */}
-      <div>
-        <label className="block mb-1 font-medium text-gray-700 dark:text-gray-300">
-          Image (optional)
-        </label>
-        <input
-          type="file"
-          accept="image/*"
-          onChange={(e) => setImage(e.target.files?.[0] || null)}
-          className="border dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 p-2 w-full rounded-lg"
-        />
-      </div>
+      <input
+        className="input"
+        placeholder="Your UB Email"
+        value={reporterEmail}
+        onChange={(e) => setReporterEmail(e.target.value)}
+      />
 
-      {/* Submit */}
+      {/* Image */}
+      <input
+        type="file"
+        className="input"
+        accept="image/*"
+        onChange={(e) => setImage(e.target.files?.[0] ?? null)}
+      />
+
       <button
-        disabled={loading}
+        className="btn w-full mt-4 bg-blue-600 text-white"
         type="submit"
-        className="w-full bg-blue-600 dark:bg-blue-500 text-white py-2 rounded-lg font-medium hover:bg-blue-700 dark:hover:bg-blue-600 transition"
+        disabled={loading}
       >
         {loading ? "Submitting..." : "Submit Report"}
       </button>
 
-      {/* Message */}
       {message && (
-        <p
-          className={`text-center font-medium ${
-            message.includes("✅")
-              ? "text-green-600 dark:text-green-400"
-              : message.includes("⚠️")
-              ? "text-yellow-600 dark:text-yellow-400"
-              : "text-red-600 dark:text-red-400"
-          }`}
-        >
-          {message}
-        </p>
+        <p className="text-center mt-3">{message}</p>
       )}
     </form>
   );
