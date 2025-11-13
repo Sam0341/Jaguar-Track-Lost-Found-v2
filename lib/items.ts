@@ -4,22 +4,22 @@ export type Item = {
   id: string;
   name: string;
   description: string;
-  category: string;
-  campus: string;
+  location?: string;
   status: string;
   image?: string;
-  image_url?: string; // ✅ added for Vercel build
-  reported_by?: string;
+  image_url?: string;
+
   reporter_name?: string;
   reporter_email?: string;
   reported_at?: string;
-  profiles?: {
-    full_name?: string;
-    email?: string;
-  }[]; // ✅ array fixed
+
+  campus_id?: string;
+  category_id?: string;
 };
 
-// 🧩 Fetch all items
+// -----------------------------------------------------
+// 📌 GET ALL ITEMS
+// -----------------------------------------------------
 export async function getAllItems() {
   console.log("📡 Fetching all items...");
 
@@ -29,13 +29,14 @@ export async function getAllItems() {
       id,
       name,
       description,
-      category,
-      campus,
+      location,
       status,
       image,
+      reported_at,
       reporter_name,
       reporter_email,
-      reported_at
+      campus:campus_id ( id, name ),
+      category:category_id ( id, name )
     `)
     .order("reported_at", { ascending: false });
 
@@ -44,25 +45,24 @@ export async function getAllItems() {
     return [];
   }
 
-  const SUPABASE_URL =
-    "https://npudlbublntelxzmzlmu.supabase.co/storage/v1/object/public/item-photos";
+  const PUBLIC_BUCKET =
+    `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/item-photos`;
 
-  const itemsWithImages = (data || []).map((item) => ({
+  return (data || []).map((item: any) => ({
     ...item,
+    campus: item.campus?.name || "Unknown Campus",
+    category: item.category?.name || "Other",
     image_url: item.image
-      ? item.image.startsWith("http")
-        ? item.image
-        : `${SUPABASE_URL}/${item.image}`
-      : "https://placehold.co/600x400?text=No+Image+Available",
+      ? `${PUBLIC_BUCKET}/${item.image}`
+      : "https://placehold.co/600x400?text=No+Image",
   }));
-
-  console.log("📦 Items fetched:", itemsWithImages);
-  return itemsWithImages;
 }
 
-// 🧩 Fetch one item by ID
+// -----------------------------------------------------
+// 📌 GET ONE ITEM BY ID
+// -----------------------------------------------------
 export async function getItemById(id: string) {
-  console.log("🔍 Fetching item by ID:", id);
+  console.log("🔍 Fetching item:", id);
 
   const { data, error } = await supabase
     .from("items")
@@ -70,53 +70,46 @@ export async function getItemById(id: string) {
       id,
       name,
       description,
-      category,
-      campus,
+      location,
       status,
       image,
       reporter_name,
       reporter_email,
       reported_at,
-      profiles (
-        full_name,
-        email
-      )
+      campus:campus_id ( id, name ),
+      category:category_id ( id, name )
     `)
     .eq("id", id)
     .single();
 
   if (error) {
-    console.error("❌ Error fetching item by ID:", error.message);
+    console.error("❌ Error getItemById:", error.message);
     return null;
   }
 
-  const SUPABASE_URL =
-    "https://npudlbublntelxzmzlmu.supabase.co/storage/v1/object/public/item-photos";
+  const PUBLIC_BUCKET =
+    `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/item-photos`;
 
-  const profile = data.profiles?.[0];
-
-  const finalData = {
+  return {
     ...data,
+    campus: data.campus?.name,
+    category: data.category?.name,
     image_url: data.image
-      ? data.image.startsWith("http")
-        ? data.image
-        : `${SUPABASE_URL}/${data.image}`
-      : "https://placehold.co/600x400?text=No+Image+Available",
-    reporter_name: profile?.full_name || data.reporter_name,
-    reporter_email: profile?.email || data.reporter_email,
+      ? `${PUBLIC_BUCKET}/${data.image}`
+      : "https://placehold.co/600x400?text=No+Image",
   };
-
-  console.log("🧩 getItemById() result:", finalData);
-  return finalData;
 }
 
-// 🧩 Add a new item
+// -----------------------------------------------------
+// 📌 ADD NEW ITEM
+// -----------------------------------------------------
 export async function addItem({
   name,
   description,
+  location,
+  status,
   category,
   campus,
-  status,
   userId,
   imageFile,
   reporterName,
@@ -124,26 +117,30 @@ export async function addItem({
 }: {
   name: string;
   description: string;
-  category: string;
-  campus: string;
+  location: string;
   status: string;
+
+  category: string;   // category_id
+  campus: string;     // campus_id
   userId: string;
+
   imageFile?: File | null;
   reporterName?: string;
   reporterEmail?: string;
 }) {
-  console.log("🆕 Adding new item...");
+  console.log("🆕 Adding Item...");
 
   try {
-    let imagePath: string | null = null;
+    let imagePath = null;
 
+    // Upload image if exists
     if (imageFile) {
       const fileName = `${Date.now()}-${imageFile.name}`;
-      const { error: uploadError } = await supabase.storage
+      const { error: uploadErr } = await supabase.storage
         .from("item-photos")
         .upload(fileName, imageFile);
 
-      if (uploadError) throw uploadError;
+      if (uploadErr) throw uploadErr;
       imagePath = fileName;
     }
 
@@ -151,19 +148,22 @@ export async function addItem({
       {
         name,
         description,
-        category,
-        campus,
+        location,
         status,
+        category_id: category,
+        campus_id: campus,
         image: imagePath,
+
         reported_by: userId,
         reporter_name: reporterName,
         reporter_email: reporterEmail,
+        reported_at: new Date().toISOString(),
       },
     ]);
 
     if (error) throw error;
 
-    console.log("✅ Item added successfully:", data);
+    console.log("✅ Added Successfully:", data);
     return true;
   } catch (err: any) {
     console.error("❌ Error adding item:", err.message || err);

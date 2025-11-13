@@ -23,7 +23,7 @@ export default function ReportForm() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // 🔹 Load categories & campuses + auto-fill profile
+  // Load categories, campuses, profile
   useEffect(() => {
     async function load() {
       const { data: userData } = await supabase.auth.getUser();
@@ -51,13 +51,14 @@ export default function ReportForm() {
     load();
   }, []);
 
-  // 📤 Submit
+  // Submit form
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setMessage("");
 
     const { data: auth } = await supabase.auth.getUser();
+
     if (!auth?.user) {
       setMessage("⚠️ You must be logged in.");
       setLoading(false);
@@ -67,10 +68,12 @@ export default function ReportForm() {
     const success = await addItem({
       name: itemName,
       description,
+      location,       // ✅ FIXED — send location
       status,
-      category: categoryId,
-      campus: campusId,
+      category: categoryId, // category_id
+      campus: campusId,     // campus_id
       userId: auth.user.id,
+
       reporterName,
       reporterEmail,
       imageFile: image,
@@ -78,6 +81,7 @@ export default function ReportForm() {
 
     if (success) {
       setMessage("✅ Report submitted successfully!");
+
       setItemName("");
       setDescription("");
       setLocation("");
@@ -97,9 +101,10 @@ export default function ReportForm() {
       onSubmit={handleSubmit}
       className="max-w-2xl mx-auto bg-white dark:bg-gray-900 p-6 rounded-2xl shadow"
     >
-      <h2 className="text-2xl font-bold text-center mb-4">Submit Lost / Found Report</h2>
+      <h2 className="text-2xl font-bold text-center mb-4">
+        Submit Lost / Found Report
+      </h2>
 
-      {/* Item Name */}
       <input
         className="input"
         placeholder="Item name"
@@ -108,7 +113,6 @@ export default function ReportForm() {
         required
       />
 
-      {/* Description */}
       <textarea
         className="input h-24"
         placeholder="Describe the item"
@@ -127,7 +131,9 @@ export default function ReportForm() {
       >
         <option value="">Select Category</option>
         {categories.map((c) => (
-          <option key={c.id} value={c.id}>{c.name}</option>
+          <option key={c.id} value={c.id}>
+            {c.name}
+          </option>
         ))}
       </select>
 
@@ -141,7 +147,9 @@ export default function ReportForm() {
       >
         <option value="">Select Campus</option>
         {campuses.map((c) => (
-          <option key={c.id} value={c.id}>{c.name}</option>
+          <option key={c.id} value={c.id}>
+            {c.name}
+          </option>
         ))}
       </select>
 
@@ -195,9 +203,7 @@ export default function ReportForm() {
         {loading ? "Submitting..." : "Submit Report"}
       </button>
 
-      {message && (
-        <p className="text-center mt-3">{message}</p>
-      )}
+      {message && <p className="text-center mt-3">{message}</p>}
     </form>
   );
 }
