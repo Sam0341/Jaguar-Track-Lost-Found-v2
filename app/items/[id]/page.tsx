@@ -93,7 +93,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
       }
 
       /* ------------------------------------------------------------------
-       * 2. Check if ANY pending claim exists for this item from ANY user
+       * 2. Check if ANY pending claim exists for this item
        * ------------------------------------------------------------------
        */
       const { data: pendingCheck } = await supabase
@@ -105,7 +105,6 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
       if (pendingCheck && pendingCheck.length > 0) {
         const pendingClaim = pendingCheck[0];
 
-        // If pending claim belongs to this user → normal flow
         if (!session?.user || pendingClaim.claimed_by !== session.user.id) {
           setSomeoneElsePending(true);
         }
@@ -209,9 +208,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
           {/* REPORT INFO */}
           <div className="text-sm dark:text-gray-300 space-y-1 mb-6">
             <p><strong>Reported by:</strong> {item.reporter_name}</p>
-            {isAdmin && (
-              <p><strong>Email:</strong> {item.reporter_email}</p>
-            )}
+            {isAdmin && <p><strong>Email:</strong> {item.reporter_email}</p>}
             <p><strong>Reported at:</strong> {formatDate(item.reported_at)}</p>
             <p><strong>Location:</strong> {item.location}</p>
           </div>
@@ -219,17 +216,17 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
           {/* ===========================================================
            * CLAIM LOGIC & UI
            * ===========================================================
-           */
+           */}
 
-          /* 🔥 BLOCK claim button if item is claimed */
-          itemClaimed && (
+          {/* ITEM CLAIMED (final) */}
+          {itemClaimed && (
             <p className="text-red-500 font-medium mb-3">
               ❌ This item has already been fully claimed.
             </p>
           )}
 
-          {/* 🔥 BLOCK claim button if another user submitted a pending claim */
-          someoneElsePending && !claimStatus && !itemClaimed && (
+          {/* SOMEONE ELSE HAS A PENDING CLAIM */}
+          {someoneElsePending && !claimStatus && !itemClaimed && (
             <p className="text-yellow-500 font-medium mb-3">
               ⚠️ Someone else is currently claiming this item.
             </p>
@@ -248,7 +245,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
             </p>
           )}
 
-          {/* SHOW CLAIM BUTTON ONLY IF ALLOWED */}
+          {/* CLAIM BUTTON (only if allowed) */}
           {!claimStatus && !itemClaimed && !someoneElsePending && (
             <button
               onClick={() => setShowClaimForm(!showClaimForm)}
@@ -277,12 +274,10 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
             </form>
           )}
 
-          {feedback && (
-            <p className="mt-3 text-center">{feedback}</p>
-          )}
+          {feedback && <p className="mt-3 text-center">{feedback}</p>}
 
-          {/* CHAT LINK */}
-          {claimId && (
+          {/* ❌ CHAT REMOVED FOR PENDING + APPROVED */}
+          {(claimStatus === null || claimStatus === "rejected") && claimId && (
             <Link
               href={`/user/chat/${claimId}`}
               className="mt-4 block text-center bg-ubGold py-2 rounded-lg font-bold"
