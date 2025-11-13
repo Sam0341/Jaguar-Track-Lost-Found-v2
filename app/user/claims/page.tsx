@@ -30,10 +30,6 @@ type Message = {
   content: string;
   created_at: string;
   is_admin: boolean;
-  profiles?: {
-    full_name: string | null;
-    email: string | null;
-  };
 };
 
 export default function MyClaimsPage() {
@@ -42,21 +38,22 @@ export default function MyClaimsPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // AUTO SCROLL
+  // Auto-scroll when messages load
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // LOAD CLAIMS + ITEMS
+  // Load user claims + items
   useEffect(() => {
     async function loadData() {
       const {
         data: { user },
       } = await supabase.auth.getUser();
-
       setUser(user);
+
       if (!user) return setLoading(false);
 
       const { data: claimRows } = await supabase
@@ -71,8 +68,7 @@ export default function MyClaimsPage() {
         return;
       }
 
-      const finalClaims = [];
-
+      const finalClaims: Claim[] = [];
       for (const claim of claimRows) {
         const { data: itemData } = await supabase
           .from("items")
@@ -80,23 +76,9 @@ export default function MyClaimsPage() {
           .eq("id", claim.item_id)
           .single();
 
-        // FIX IMAGE (convert supabase path → public URL)
-        let imageUrl = null;
-        if (itemData?.image) {
-          const { data: bucket } = supabase.storage
-            .from("item-photos")
-            .getPublicUrl(itemData.image);
-          imageUrl = bucket?.publicUrl || null;
-        }
-
         finalClaims.push({
           ...claim,
-          item: itemData
-            ? {
-                ...itemData,
-                image: imageUrl,
-              }
-            : null,
+          item: itemData || null,
         });
       }
 
@@ -107,16 +89,15 @@ export default function MyClaimsPage() {
     loadData();
   }, []);
 
-  // LOAD MESSAGES FOR CHAT VIEW
+  // Load messages in selected chat
   useEffect(() => {
     if (!selectedClaim) return;
-
     const claimId = selectedClaim.id;
 
     async function loadMessages() {
       const { data } = await supabase
         .from("messages")
-        .select("*, profiles:sender_id(full_name,email)")
+        .select("*")
         .eq("claim_id", claimId)
         .order("created_at", { ascending: true });
 
@@ -125,7 +106,6 @@ export default function MyClaimsPage() {
 
     loadMessages();
 
-    // LIVE CHAT LISTENER
     const channel = supabase
       .channel(`claim-${claimId}`)
       .on(
@@ -143,16 +123,16 @@ export default function MyClaimsPage() {
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      // call removeChannel but don't return its Promise to satisfy React's cleanup signature
+      void supabase.removeChannel(channel);
     };
   }, [selectedClaim]);
 
-  // SEND MESSAGE
+  // Send message
   async function sendMessage(e: any) {
     e.preventDefault();
     const input = e.target.elements.message;
     const content = input.value.trim();
-
     if (!content || !user || !selectedClaim) return;
 
     await supabase.from("messages").insert([
@@ -167,11 +147,11 @@ export default function MyClaimsPage() {
     input.value = "";
   }
 
-  // UI STARTS HERE --------------------------
-
   if (loading)
     return (
-      <p className="text-center text-gray-400 pt-20">Loading your claims...</p>
+      <p className="text-center text-gray-400 pt-20">
+        Loading your claims...
+      </p>
     );
 
   return (
@@ -180,7 +160,7 @@ export default function MyClaimsPage() {
         🧾 My Claims
       </h1>
 
-      {/* CLAIM LIST VIEW */}
+      {/* CLAIM LIST */}
       {!selectedClaim ? (
         claims.length === 0 ? (
           <p className="text-center text-gray-400">
@@ -191,7 +171,7 @@ export default function MyClaimsPage() {
             {claims.map((claim) => (
               <div
                 key={claim.id}
-                className="bg-gray-900 p-4 rounded-xl border border-gray-800 hover:border-ubGold cursor-pointer transition"
+                className="bg-gray-900 p-4 rounded-xl shadow cursor-pointer border border-gray-800 hover:border-ubGold transition"
                 onClick={() => setSelectedClaim(claim)}
               >
                 <img
@@ -203,10 +183,10 @@ export default function MyClaimsPage() {
                 />
 
                 <h2 className="text-lg font-semibold text-white">
-                  {claim.item?.name || "Unknown Item"}
+                  {claim.item?.name}
                 </h2>
 
-                <p className="text-gray-500 text-sm">
+                <p className="text-gray-400 text-sm">
                   {claim.item?.campus || "No campus"}
                 </p>
 
@@ -231,95 +211,105 @@ export default function MyClaimsPage() {
         )
       ) : (
         <>
-          {/* CHAT VIEW */}
+          {/* BACK BUTTON */}
           <button
             onClick={() => setSelectedClaim(null)}
-            className="mb-4 px-4 py-2 bg-gray-800 text-white rounded-lg"
+            className="mb-4 px-4 py-2 bg-gray-800 rounded-lg text-white"
           >
             ← Back
           </button>
 
-          <div className="bg-gray-900 rounded-xl shadow p-4">
-            {/* ITEM TITLE */}
-            <h2 className="text-xl font-bold text-white mb-2">
+          {/* CHAT HEADER */}
+          <div className="bg-gray-800 p-4 rounded-lg border border-gray-700 mb-4">
+            <h2 className="text-2xl font-bold text-white mb-1">
               {selectedClaim.item?.name}
             </h2>
 
-            {/* ITEM DESCRIPTION */}
-            <p className="text-gray-300 text-sm mb-2">
-              {selectedClaim.item?.description}
-            </p>
+            {/* CLAIM STATUS */}
+            <span
+              className={`px-3 py-1 text-xs rounded-full font-semibold ${
+                selectedClaim.status === "approved"
+                  ? "bg-green-600"
+                  : selectedClaim.status === "rejected"
+                  ? "bg-red-600"
+                  : "bg-yellow-500"
+              }`}
+            >
+              {selectedClaim.status?.toUpperCase()}
+            </span>
 
-            {/* LOCATION + CAMPUS */}
-            <p className="text-gray-400 text-xs mb-1">
+            <p className="text-gray-400 text-sm mt-2">
               📍 Location: {selectedClaim.item?.location || "Unknown"}
             </p>
-            <p className="text-gray-400 text-xs mb-3">
+            <p className="text-gray-400 text-sm">
               🏫 Campus: {selectedClaim.item?.campus || "Unknown"}
             </p>
 
-            {/* CLAIM MESSAGE (THE USER'S REASON) */}
-            {selectedClaim.message && (
-              <div className="mt-2 p-3 bg-gray-800 border border-gray-700 rounded-lg mb-4">
-                <p className="text-sm text-gray-300">
-                  <span className="font-semibold text-ubGold">
-                    Claim Message:
-                  </span>
-                  <br />
-                  {selectedClaim.message}
-                </p>
-              </div>
-            )}
+            {/* CLAIM MESSAGE BUBBLE */}
+            <div className="mt-4 bg-ubGold text-black p-4 rounded-xl shadow">
+              <p className="font-bold text-sm">Claim Message:</p>
+              <p className="text-sm mt-1">{selectedClaim.message}</p>
+            </div>
+          </div>
 
-            {/* MESSAGES */}
-            <div className="h-[55vh] overflow-y-auto space-y-3 mb-4 p-2 border-t border-b border-gray-700">
-              {messages.map((msg) => (
+          {/* CHAT MESSAGES */}
+          <div className="h-[60vh] overflow-y-auto space-y-3 p-2 bg-gray-900 rounded-lg border border-gray-700">
+            {messages.map((msg) => (
+              <div
+                key={msg.id}
+                className={`flex ${
+                  msg.sender_id === user?.id
+                    ? "justify-end"
+                    : "justify-start"
+                }`}
+              >
                 <div
-                  key={msg.id}
-                  className={`flex ${
+                  className={`p-3 rounded-xl max-w-[70%] shadow ${
                     msg.sender_id === user?.id
-                      ? "justify-end"
-                      : "justify-start"
+                      ? "bg-ubGold text-black"
+                      : "bg-gray-800 text-white border border-gray-700"
                   }`}
                 >
-                  <div
-                    className={`p-3 rounded-xl max-w-[70%] ${
+                  <p
+                    className={`text-[10px] mb-1 font-bold ${
                       msg.sender_id === user?.id
-                        ? "bg-ubGold text-black"
-                        : "bg-gray-800 text-white"
+                        ? "text-black"
+                        : "text-ubGold"
                     }`}
                   >
-                    <p>{msg.content}</p>
+                    {msg.sender_id === user?.id ? "YOU" : "ADMIN"}
+                  </p>
 
-                    <p className="text-[10px] opacity-60 mt-1">
-                      {new Date(msg.created_at).toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </p>
-                  </div>
+                  <p>{msg.content}</p>
+
+                  <p className="text-[10px] opacity-60 mt-1 text-right">
+                    {new Date(msg.created_at).toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </p>
                 </div>
-              ))}
+              </div>
+            ))}
 
-              <div ref={messagesEndRef} />
-            </div>
-
-            {/* INPUT */}
-            <form
-              onSubmit={sendMessage}
-              className="flex gap-2 border-t border-gray-700 pt-3"
-            >
-              <input
-                type="text"
-                name="message"
-                placeholder="Type your message..."
-                className="flex-1 px-3 py-2 bg-gray-800 text-white rounded-lg border border-gray-700"
-              />
-              <button className="px-4 py-2 bg-ubGold text-black rounded-lg">
-                Send
-              </button>
-            </form>
+            <div ref={messagesEndRef} />
           </div>
+
+          {/* MESSAGE INPUT */}
+          <form
+            onSubmit={sendMessage}
+            className="flex gap-2 mt-3 border-t border-gray-700 pt-3"
+          >
+            <input
+              type="text"
+              name="message"
+              placeholder="Type your message..."
+              className="flex-1 px-3 py-2 bg-gray-800 text-white rounded-lg border border-gray-700"
+            />
+            <button className="px-4 py-2 bg-ubGold text-black rounded-lg font-bold">
+              Send
+            </button>
+          </form>
         </>
       )}
     </div>
