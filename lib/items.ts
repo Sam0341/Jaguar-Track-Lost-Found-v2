@@ -4,25 +4,23 @@ export type Item = {
   id: string;
   name: string;
   description: string;
-  location?: string;
+  location: string;
   status: string;
   image?: string;
   image_url?: string;
 
+  campus?: string;
+  category?: string;
+
   reporter_name?: string;
   reporter_email?: string;
   reported_at?: string;
-
-  campus_id?: string;
-  category_id?: string;
 };
 
-// -----------------------------------------------------
-// 📌 GET ALL ITEMS
-// -----------------------------------------------------
+// ----------------------------
+// FETCH ALL ITEMS
+// ----------------------------
 export async function getAllItems() {
-  console.log("📡 Fetching all items...");
-
   const { data, error } = await supabase
     .from("items")
     .select(`
@@ -50,20 +48,18 @@ export async function getAllItems() {
 
   return (data || []).map((item: any) => ({
     ...item,
-    campus: item.campus?.name || "Unknown Campus",
-    category: item.category?.name || "Other",
+    campus: item.campus?.[0]?.name || "Unknown Campus",
+    category: item.category?.[0]?.name || "Other",
     image_url: item.image
       ? `${PUBLIC_BUCKET}/${item.image}`
       : "https://placehold.co/600x400?text=No+Image",
   }));
 }
 
-// -----------------------------------------------------
-// 📌 GET ONE ITEM BY ID
-// -----------------------------------------------------
+// ----------------------------
+// FETCH ONE ITEM BY ID
+// ----------------------------
 export async function getItemById(id: string) {
-  console.log("🔍 Fetching item:", id);
-
   const { data, error } = await supabase
     .from("items")
     .select(`
@@ -73,17 +69,17 @@ export async function getItemById(id: string) {
       location,
       status,
       image,
+      reported_at,
       reporter_name,
       reporter_email,
-      reported_at,
       campus:campus_id ( id, name ),
       category:category_id ( id, name )
     `)
     .eq("id", id)
-    .single();
+    .single(); // <== IMPORTANT!
 
   if (error) {
-    console.error("❌ Error getItemById:", error.message);
+    console.error("❌ Error fetching item:", error.message);
     return null;
   }
 
@@ -92,17 +88,17 @@ export async function getItemById(id: string) {
 
   return {
     ...data,
-    campus: data.campus?.name,
-    category: data.category?.name,
+    campus: data.campus?.[0]?.name || "Unknown Campus",
+    category: data.category?.[0]?.name || "Other",
     image_url: data.image
       ? `${PUBLIC_BUCKET}/${data.image}`
       : "https://placehold.co/600x400?text=No+Image",
   };
 }
 
-// -----------------------------------------------------
-// 📌 ADD NEW ITEM
-// -----------------------------------------------------
+// ----------------------------
+// ADD A NEW ITEM
+// ----------------------------
 export async function addItem({
   name,
   description,
@@ -119,51 +115,46 @@ export async function addItem({
   description: string;
   location: string;
   status: string;
-
-  category: string;   // category_id
-  campus: string;     // campus_id
+  category: string; // category_id
+  campus: string;   // campus_id
   userId: string;
-
   imageFile?: File | null;
   reporterName?: string;
   reporterEmail?: string;
 }) {
-  console.log("🆕 Adding Item...");
-
   try {
-    let imagePath = null;
+    let imagePath: string | null = null;
 
-    // Upload image if exists
     if (imageFile) {
       const fileName = `${Date.now()}-${imageFile.name}`;
-      const { error: uploadErr } = await supabase.storage
+      const { error: uploadError } = await supabase.storage
         .from("item-photos")
         .upload(fileName, imageFile);
 
-      if (uploadErr) throw uploadErr;
+      if (uploadError) throw uploadError;
       imagePath = fileName;
     }
 
-    const { data, error } = await supabase.from("items").insert([
+    const { error } = await supabase.from("items").insert([
       {
         name,
         description,
         location,
         status,
-        category_id: category,
-        campus_id: campus,
         image: imagePath,
-
         reported_by: userId,
         reporter_name: reporterName,
         reporter_email: reporterEmail,
-        reported_at: new Date().toISOString(),
+
+        // FK VALUES
+        category_id: category,
+        campus_id: campus,
       },
     ]);
 
     if (error) throw error;
 
-    console.log("✅ Added Successfully:", data);
+    console.log("✅ Item added successfully");
     return true;
   } catch (err: any) {
     console.error("❌ Error adding item:", err.message || err);
