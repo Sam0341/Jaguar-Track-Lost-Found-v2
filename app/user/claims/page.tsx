@@ -3,24 +3,24 @@
 import { useEffect, useState, useRef } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
-// Types
+// TYPES
 type Item = {
   id: string;
   name: string;
+  campus: string | null;
   description: string | null;
-  location: string | null;
   image: string | null;
-  campus?: { name: string | null };
-  category?: { name: string | null };
+  location: string | null;
 };
 
 type Claim = {
   id: string;
   item_id: string;
+  claimed_by: string;
   message: string | null;
   status: string | null;
   created_at: string;
-  items: Item | null;
+  item?: Item; // <-- manually attached
 };
 
 type Message = {
@@ -29,6 +29,7 @@ type Message = {
   sender_id: string;
   content: string;
   created_at: string;
+  is_admin: boolean;
   profiles?: {
     full_name: string | null;
     email: string | null;
@@ -39,205 +40,174 @@ export default function MyClaimsPage() {
   const [claims, setClaims] = useState<Claim[]>([]);
   const [selectedClaim, setSelectedClaim] = useState<Claim | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [newMessage, setNewMessage] = useState("");
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [zoomImage, setZoomImage] = useState<string | null>(null);
-
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll chat
+  // AUTO SCROLL
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Load user + claims
+  // LOAD CLAIMS + ITEMS
   useEffect(() => {
-    async function loadClaims() {
+    async function loadData() {
       const {
         data: { user },
       } = await supabase.auth.getUser();
-      setUser(user);
 
-      if (!user) {
+      setUser(user);
+      if (!user) return setLoading(false);
+
+      // 1) Load user claims
+      const { data: claimRows } = await supabase
+        .from("claims")
+        .select("*")
+        .eq("claimed_by", user.id)
+        .order("created_at", { ascending: false });
+
+      if (!claimRows || claimRows.length === 0) {
+        setClaims([]);
         setLoading(false);
         return;
       }
 
-      // FIXED QUERY FOR NEW DB STRUCTURE
-      const { data, error } = await supabase
-        .from("claims")
-        .select(`
-          id,
-          item_id,
-          message,
-          status,
-          created_at,
-          items:item_id (
-            id,
-            name,
-            description,
-            image,
-            location,
-            campus:campus_id ( name ),
-            category:category_id ( name )
-          )
-        `)
-        .eq("claimed_by", user.id)
-        .order("created_at", { ascending: false });
+      // 2) Load items for each claim (MANUAL loading)
+      const finalClaims = [];
+      for (const claim of claimRows) {
+        const { data: itemData } = await supabase
+          .from("items")
+          .select("*")
+          .eq("id", claim.item_id)
+          .single();
 
-      if (!error && data) {
-        const processed = data.map((claim: any) => {
-          let imgUrl = null;
-          if (claim.items?.image) {
-            const { data: pub } = supabase.storage
-              .from("item-photos")
-              .getPublicUrl(claim.items.image);
-
-            imgUrl = pub?.publicUrl || null;
-          }
-
-          return {
-            ...claim,
-            items: {
-              ...claim.items,
-              image: imgUrl,
-            },
-          };
+        // Attach item manually
+        finalClaims.push({
+          ...claim,
+          item: itemData || null,
         });
-
-        setClaims(processed);
       }
 
+      setClaims(finalClaims);
       setLoading(false);
     }
 
-    loadClaims();
+    loadData();
   }, []);
 
-  // Load messages when claim is opened
-    useEffect(() => {
-      const claimId = selectedClaim?.id;
-      if (!claimId) return;
-  
-      async function loadThread() {
-        const { data } = await supabase
-          .from("messages")
-          .select(`*, profiles:sender_id(full_name, email)`)
-          .eq("claim_id", claimId)
-          .order("created_at", { ascending: true });
-  
-        setMessages(data || []);
-      }
-  
-      loadThread();
-  
-      // Real-time
-      const channel = supabase
-        .channel(`claim-${claimId}`)
-        .on(
-          "postgres_changes",
-          {
-            event: "INSERT",
-            schema: "public",
-            table: "messages",
-            filter: `claim_id=eq.${claimId}`,
-          },
-          (payload) => {
-            setMessages((prev) => [...prev, payload.new as Message]);
-          }
-        )
-        .subscribe();
-  
-      // ensure cleanup returns void (not a Promise)
-      return () => {
-        void supabase.removeChannel(channel);
-      };
-    }, [selectedClaim]);
+  // LOAD MESSAGES FOR CHAT VIEW
+  useEffect(() => {
+    if (!selectedClaim) return;
+    const claimId = selectedClaim.id;
 
+    async function loadMessages() {
+      const { data } = await supabase
+        .from("messages")
+        .select("*, profiles:sender_id(full_name,email)")
+        .eq("claim_id", claimId)
+        .order("created_at", { ascending: true });
+
+      setMessages(data || []);
+    }
+
+    loadMessages();
+
+    const channel = supabase
+      .channel(`claim-${claimId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          table: "messages",
+          filter: `claim_id=eq.${claimId}`,
+          schema: "public",
+        },
+        (payload) => {
+          setMessages((prev) => [...prev, payload.new as Message]);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [selectedClaim]);
+
+  // SEND MESSAGE
   async function sendMessage(e: any) {
     e.preventDefault();
-    if (!newMessage.trim() || !selectedClaim || !user) return;
+    const input = e.target.elements.message;
+    const content = input.value.trim();
+
+    if (!content || !user || !selectedClaim) return;
 
     await supabase.from("messages").insert([
       {
         claim_id: selectedClaim.id,
         sender_id: user.id,
-        content: newMessage.trim(),
+        content,
         is_admin: false,
       },
     ]);
 
-    setNewMessage("");
+    input.value = "";
   }
 
-  // Date formatter
-  const formatDate = (date: string) =>
-    new Date(date).toLocaleString("en-BZ", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    });
+  // UI STARTS HERE --------------------------
 
-  // LOADING SCREEN
   if (loading)
     return (
-      <div className="flex justify-center items-center h-[70vh] text-gray-400">
+      <p className="text-center text-gray-400 pt-20">
         Loading your claims...
-      </div>
+      </p>
     );
 
-  // RETURN
   return (
-    <div className="p-6 max-w-6xl mx-auto">
+    <div className="max-w-5xl mx-auto p-6">
       <h1 className="text-3xl font-bold text-ubGold text-center mb-6">
         🧾 My Claims
       </h1>
 
-      {/* ---------------- LIST VIEW ---------------- */}
+      {/* CLAIM LIST */}
       {!selectedClaim ? (
         claims.length === 0 ? (
           <p className="text-center text-gray-400">
             You haven’t made any claims yet.
           </p>
         ) : (
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid md:grid-cols-2 gap-6">
             {claims.map((claim) => (
               <div
                 key={claim.id}
-                className="p-5 bg-white dark:bg-gray-900 border rounded-xl shadow hover:shadow-lg cursor-pointer transition"
+                className="bg-gray-900 p-4 rounded-xl shadow cursor-pointer border border-gray-800 hover:border-ubGold transition"
                 onClick={() => setSelectedClaim(claim)}
               >
                 <img
                   src={
-                    claim.items?.image ??
+                    claim.item?.image ||
                     "https://placehold.co/400x300?text=No+Image"
                   }
                   className="w-full h-40 object-cover rounded-lg mb-3"
                 />
-
-                <h3 className="text-lg font-semibold dark:text-white">
-                  {claim.items?.name}
-                </h3>
-
-                <p className="text-sm text-gray-500 dark:text-gray-300">
-                  {claim.items?.campus?.name}
+                <h2 className="text-lg font-semibold text-white">
+                  {claim.item?.name || "Unknown Item"}
+                </h2>
+                <p className="text-gray-400 text-sm">
+                  {claim.item?.campus || "No campus"}
                 </p>
 
-                <p className="text-sm text-gray-400 mt-2 line-clamp-2">
-                  {claim.message || "No message included."}
+                <p className="text-gray-500 text-sm mt-2 line-clamp-2">
+                  {claim.message}
                 </p>
 
                 <span
-                  className={`inline-block mt-3 px-3 py-1 text-xs rounded-full text-white ${
+                  className={`mt-3 inline-block px-3 py-1 text-xs rounded-full ${
                     claim.status === "approved"
                       ? "bg-green-600"
                       : claim.status === "rejected"
                       ? "bg-red-600"
                       : "bg-yellow-500"
-                  }`}
+                  } text-white`}
                 >
                   {claim.status}
                 </span>
@@ -246,117 +216,69 @@ export default function MyClaimsPage() {
           </div>
         )
       ) : (
-        /* ---------------- CHAT VIEW ---------------- */
-        <div className="max-w-3xl mx-auto bg-gray-900 text-white rounded-xl shadow-lg overflow-hidden">
-          {/* Header */}
-          <div className="bg-gray-800 p-4 border-b border-gray-700 flex justify-between">
-            <div>
-              <h2 className="text-lg font-bold">{selectedClaim.items?.name}</h2>
-              <p className="text-xs text-gray-400">
-                {selectedClaim.items?.campus?.name} •{" "}
-                {formatDate(selectedClaim.created_at)}
-              </p>
-            </div>
+        <>
+          {/* CHAT VIEW */}
+          <button
+            onClick={() => setSelectedClaim(null)}
+            className="mb-4 px-4 py-2 bg-gray-800 rounded-lg text-white"
+          >
+            ← Back
+          </button>
 
-            <button
-              onClick={() => setSelectedClaim(null)}
-              className="bg-gray-700 px-3 py-1 rounded-md hover:bg-gray-600"
-            >
-              ← Back
-            </button>
-          </div>
+          <div className="bg-gray-900 rounded-xl shadow p-4">
+            <h2 className="text-xl font-bold text-white mb-2">
+              {selectedClaim.item?.name}
+            </h2>
 
-          {/* Item summary */}
-          <div className="bg-gray-800 p-4 border-b border-gray-700 flex gap-4">
-            <img
-              src={
-                selectedClaim.items?.image ??
-                "https://placehold.co/100x100?text=No+Image"
-              }
-              className="w-20 h-20 rounded-lg object-cover"
-            />
-
-            <div>
-              <p className="text-sm text-gray-300 italic">
-                {selectedClaim.items?.description}
-              </p>
-              <p className="text-xs text-gray-400 mt-1">
-                📍 {selectedClaim.items?.location}
-              </p>
-            </div>
-          </div>
-
-          {/* Messages */}
-          <div className="p-4 h-[60vh] overflow-y-auto space-y-3">
-            {messages.map((msg) => {
-              const isUser = msg.sender_id === user?.id;
-              return (
+            {/* CHAT MESSAGES */}
+            <div className="h-[60vh] overflow-y-auto space-y-3 mb-4 p-2 border-t border-b border-gray-700">
+              {messages.map((msg) => (
                 <div
                   key={msg.id}
                   className={`flex ${
-                    isUser ? "justify-end" : "justify-start"
+                    msg.sender_id === user?.id
+                      ? "justify-end"
+                      : "justify-start"
                   }`}
                 >
                   <div
-                    className={`p-3 rounded-2xl max-w-[70%] ${
-                      isUser
+                    className={`p-3 rounded-xl max-w-[70%] ${
+                      msg.sender_id === user?.id
                         ? "bg-ubGold text-black"
-                        : "bg-gray-800 border border-gray-700"
+                        : "bg-gray-800 text-white"
                     }`}
                   >
-                    {!isUser && (
-                      <p className="text-xs text-gray-400 mb-1">
-                        {msg.profiles?.email}
-                      </p>
-                    )}
-
                     <p>{msg.content}</p>
-
-                    <p className="text-[10px] text-gray-400 mt-1 text-right">
-                      {new Date(msg.created_at).toLocaleTimeString()}
+                    <p className="text-[10px] opacity-60 mt-1">
+                      {new Date(msg.created_at).toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
                     </p>
                   </div>
                 </div>
-              );
-            })}
+              ))}
 
-            <div ref={messagesEndRef} />
-          </div>
+              <div ref={messagesEndRef} />
+            </div>
 
-          {/* Input Box */}
-          <form
-            onSubmit={sendMessage}
-            className="p-4 border-t border-gray-700 flex gap-2 bg-gray-800"
-          >
-            <input
-              type="text"
-              value={newMessage}
-              onChange={(e) => setNewMessage(e.target.value)}
-              placeholder="Type your message..."
-              className="flex-1 bg-gray-900 text-white p-2 rounded-lg border border-gray-700"
-            />
-
-            <button
-              type="submit"
-              className="bg-ubGold text-black px-4 py-2 rounded-lg"
+            {/* MESSAGE INPUT */}
+            <form
+              onSubmit={sendMessage}
+              className="flex gap-2 border-t border-gray-700 pt-3"
             >
-              Send
-            </button>
-          </form>
-        </div>
-      )}
-
-      {/* Zoomed Image */}
-      {zoomImage && (
-        <div
-          onClick={() => setZoomImage(null)}
-          className="fixed inset-0 bg-black/80 flex justify-center items-center"
-        >
-          <img
-            src={zoomImage}
-            className="max-w-[90vw] max-h-[90vh] rounded-lg shadow-lg"
-          />
-        </div>
+              <input
+                type="text"
+                name="message"
+                placeholder="Type your message..."
+                className="flex-1 px-3 py-2 bg-gray-800 text-white rounded-lg border border-gray-700"
+              />
+              <button className="px-4 py-2 bg-ubGold text-black rounded-lg">
+                Send
+              </button>
+            </form>
+          </div>
+        </>
       )}
     </div>
   );
