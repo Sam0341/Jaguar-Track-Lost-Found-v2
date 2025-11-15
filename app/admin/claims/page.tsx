@@ -3,19 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
-/* ============================
-   TYPES
-============================ */
-
-type Campus = {
-  id: string;
-  name: string;
-};
-
-type Category = {
-  id: string;
-  name: string;
-};
+/* ---------------------------------- TYPES ---------------------------------- */
 
 type ItemData = {
   id: string;
@@ -23,30 +11,35 @@ type ItemData = {
   description: string | null;
   location: string | null;
   image: string | null;
+  status: string | null;
   campus_id: string | null;
   category_id: string | null;
-
-  campuses?: Campus | null;
-  categories?: Category | null;
 };
 
 type ProfileData = {
   id: string;
   full_name: string | null;
   email: string | null;
-  phone?: string | null;
 };
 
-type ClaimView = {
+type ClaimRow = {
   id: string;
   item_id: string;
   claimed_by: string;
   message: string | null;
   status: string | null;
   created_at: string;
+};
 
-  items?: ItemData | null;
-  profiles?: ProfileData | null;
+type ClaimView = {
+  id: string;
+  message: string | null;
+  status: string | null;
+  created_at: string | null;
+  item: ItemData | null;
+  user: ProfileData | null;
+  campus: string | null;
+  category: string | null;
 };
 
 type Message = {
@@ -55,132 +48,156 @@ type Message = {
   sender_id: string;
   content: string;
   created_at: string;
-  is_admin: boolean;
-
-  profiles?: {
-    full_name: string | null;
-    email: string | null;
-  } | null;
+  profiles?: { full_name: string | null; email: string | null };
 };
 
-/* ============================
-   PAGE START
-============================ */
+/* -------------------------------------------------------------------------- */
+/*                                MAIN COMPONENT                              */
+/* -------------------------------------------------------------------------- */
 
 export default function AdminClaimsPage() {
   const [claims, setClaims] = useState<ClaimView[]>([]);
   const [selectedClaim, setSelectedClaim] = useState<ClaimView | null>(null);
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState("");
+
   const [loading, setLoading] = useState(true);
-  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] =
     useState<"all" | "pending" | "approved" | "rejected">("all");
 
-  const [toastMsg, setToastMsg] = useState<string | null>(null);
-  const [toastOpen, setToastOpen] = useState(false);
+  const [busyStatusId, setBusyStatusId] = useState<string | null>(null);
+  const [busyReturnId, setBusyReturnId] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  /* ============================
-     LOAD CLAIMS
-  ============================ */
+  /* ========================= FETCH ALL CLAIMS ========================= */
 
-  async function fetchClaims() {
-    setLoading(true);
+  const fetchClaims = async () => {
+    setErrorMsg(null);
+
     try {
-      const { data, error } = await supabase
+      // 1️⃣ Load raw claims
+      const { data: claimRows, error: claimErr } = await supabase
         .from("claims")
-        .select(`
-          id,
-          item_id,
-          claimed_by,
-          message,
-          status,
-          created_at,
-
-          items:item_id (
-            id,
-            name,
-            description,
-            location,
-            image,
-            campus_id,
-            category_id,
-
-            campuses:campus_id (
-              id,
-              name
-            ),
-
-            categories:category_id (
-              id,
-              name
-            )
-          ),
-
-          profiles:claimed_by (
-            id,
-            full_name,
-            email,
-            phone
-          )
-        `)
+        .select("*")
         .order("created_at", { ascending: false });
 
-      if (error) throw error;
+      if (claimErr) throw claimErr;
 
-      setClaims((data as unknown as ClaimView[]) || []);
+      const final: ClaimView[] = [];
+
+      // 2️⃣ For each claim, join items + user + campus + category manually
+      for (const row of claimRows as ClaimRow[]) {
+        const { data: item } = await supabase
+          .from("items")
+          .select("*")
+          .eq("id", row.item_id)
+          .single();
+
+        const { data: user } = await supabase
+          .from("profiles")
+          .select("id, full_name, email")
+          .eq("id", row.claimed_by)
+          .single();
+
+        const { data: campus } =
+          item?.campus_id
+            ? await supabase
+                .from("campuses")
+                .select("name")
+                .eq("id", item.campus_id)
+                .single()
+            : { data: null };
+
+        const { data: category } =
+          item?.category_id
+            ? await supabase
+                .from("categories")
+                .select("name")
+                .eq("id", item.category_id)
+                .single()
+            : { data: null };
+
+        // 3️⃣ Fix image URL
+        let imageUrl: string | null = null;
+        if (item?.image) {
+          const { data: url } = supabase.storage
+            .from("item-photos")
+            .getPublicUrl(item.image);
+          imageUrl = url?.publicUrl || null;
+        }
+
+        final.push({
+          id: row.id,
+          message: row.message,
+          status: row.status,
+          created_at: row.created_at,
+          item: item
+            ? {
+                ...item,
+                image: imageUrl,
+              }
+            : null,
+          user,
+          campus: campus?.name || null,
+          category: category?.name || null,
+        });
+      }
+
+      setClaims(final);
     } catch (err: any) {
       console.error("Fetch claims error:", err);
+      setErrorMsg(err.message || "Failed to fetch claims");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
-  }
+  };
 
   useEffect(() => {
+    setLoading(true);
     fetchClaims();
   }, []);
 
-  /* ============================
-     UPDATE STATUS
-  ============================ */
-
-  async function updateClaimStatus(
-    claimId: string,
-    status: "approved" | "rejected"
-  ) {
-    setActionLoading(claimId);
-
-    try {
-      const { error } = await supabase
-        .from("claims")
-        .update({ status })
-        .eq("id", claimId);
-
-      if (error) throw error;
-
-      openToast(`Claim ${status}!`);
-      fetchClaims();
-    } catch (err: any) {
-      openToast("Failed to update status.");
-    }
-
-    setActionLoading(null);
-  }
-
-  /* ============================
-     LOAD MESSAGES FOR CHAT
-  ============================ */
+  /* ========================= REALTIME DASHBOARD ========================= */
 
   useEffect(() => {
-    const claimId = selectedClaim?.id;
-    if (!claimId) return;
+    const channel = supabase
+      .channel("admin-claims-dashboard")
+      .on(
+        "postgres_changes",
+        {
+          schema: "public",
+          table: "claims",
+          event: "*",
+        },
+        () => {
+          // whenever a claim is inserted/updated/deleted, refresh dashboard
+          fetchClaims();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /* ========================= CHAT: LOAD MESSAGES ========================= */
+
+  useEffect(() => {
+    if (!selectedClaim) return;
+
+    const claimId = selectedClaim.id;
 
     async function loadMessages() {
       const { data } = await supabase
         .from("messages")
-        .select(`*, profiles:sender_id(full_name, email)`)
+        .select("*, profiles:sender_id(full_name,email)")
         .eq("claim_id", claimId)
         .order("created_at", { ascending: true });
 
@@ -190,7 +207,7 @@ export default function AdminClaimsPage() {
     loadMessages();
 
     const channel = supabase
-      .channel(`messages:claim=${claimId}`)
+      .channel(`claim-${claimId}`)
       .on(
         "postgres_changes",
         {
@@ -214,23 +231,21 @@ export default function AdminClaimsPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  /* ============================
-     SEND MESSAGE
-  ============================ */
+  /* ========================= SEND MESSAGE (ADMIN) ========================= */
 
   async function sendMessage(e: React.FormEvent) {
     e.preventDefault();
-
     if (!selectedClaim || !newMessage.trim()) return;
 
     const {
       data: { user },
     } = await supabase.auth.getUser();
+    if (!user) return;
 
     await supabase.from("messages").insert([
       {
         claim_id: selectedClaim.id,
-        sender_id: user?.id,
+        sender_id: user.id,
         content: newMessage.trim(),
         is_admin: true,
       },
@@ -239,272 +254,418 @@ export default function AdminClaimsPage() {
     setNewMessage("");
   }
 
-  /* ============================
-     TOAST
-  ============================ */
+  /* ========================= APPROVE / REJECT ========================= */
 
-  function openToast(msg: string) {
-    setToastMsg(msg);
-    setToastOpen(true);
-    setTimeout(() => setToastOpen(false), 3000);
+  async function updateClaimStatus(
+    id: string,
+    status: "approved" | "rejected"
+  ) {
+    setBusyStatusId(id);
+    try {
+      const { error } = await supabase
+        .from("claims")
+        .update({ status })
+        .eq("id", id);
+
+      if (error) throw error;
+
+      await fetchClaims();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setBusyStatusId(null);
+    }
   }
 
-  /* ============================
-     FILTERS
-  ============================ */
+  /* ========================= MARK ITEM RETURNED ========================= */
+
+  async function markItemReturned(claim: ClaimView) {
+    if (!claim.item) return;
+
+    setBusyReturnId(claim.id);
+    try {
+      const nowIso = new Date().toISOString();
+
+      const {
+        data: { user: admin },
+      } = await supabase.auth.getUser();
+
+      // 1) Update item as claimed/returned
+      const itemUpdate: any = {
+        status: "Claimed",
+        claimed_at: nowIso,
+      };
+      if (claim.user?.id) itemUpdate.claimed_by = claim.user.id;
+
+      const { error: itemErr } = await supabase
+        .from("items")
+        .update(itemUpdate)
+        .eq("id", claim.item.id);
+
+      if (itemErr) throw itemErr;
+
+      // 2) Ensure claim is approved
+      if (claim.status !== "approved") {
+        await supabase
+          .from("claims")
+          .update({ status: "approved" })
+          .eq("id", claim.id);
+      }
+
+      // 3) Log action
+      if (admin?.id) {
+        await supabase.from("logs").insert([
+          {
+            action: "item_returned",
+            item_id: claim.item.id,
+            performed_by: admin.id,
+            timestamp: nowIso,
+          },
+        ]);
+      }
+
+      await fetchClaims();
+    } catch (err) {
+      console.error("Mark returned error:", err);
+      alert("Failed to mark item as returned.");
+    } finally {
+      setBusyReturnId(null);
+    }
+  }
+
+  /* ========================= FILTERS & STATS ========================= */
 
   const filteredClaims = useMemo(() => {
-    const term = search.toLowerCase().trim();
+    const term = search.trim().toLowerCase();
 
     return claims.filter((c) => {
-      const statusMatch =
-        statusFilter === "all" || (c.status ?? "pending") === statusFilter;
+      const statusValue = (c.status || "pending").toLowerCase();
 
-      const txt =
-        [
-          c.items?.name,
-          c.items?.location,
-          c.items?.campuses?.name,
-          c.items?.categories?.name,
-          c.profiles?.full_name,
-          c.profiles?.email,
-        ]
-          .join(" ")
-          .toLowerCase() || "";
+      const statusOk =
+        statusFilter === "all" || statusValue === statusFilter;
 
-      const searchMatch = !term || txt.includes(term);
+      const haystack = [
+        c.item?.name,
+        c.campus,
+        c.category,
+        c.user?.email,
+        c.user?.full_name,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
 
-      return statusMatch && searchMatch;
+      const searchOk = !term || haystack.includes(term);
+
+      return statusOk && searchOk;
     });
   }, [claims, search, statusFilter]);
 
-  /* ============================
-     PAGE UI
-  ============================ */
+  const stats = useMemo(() => {
+    const total = claims.length;
+    const pending = claims.filter(
+      (c) => (c.status || "pending") === "pending"
+    ).length;
+    const approved = claims.filter((c) => c.status === "approved").length;
+    const rejected = claims.filter((c) => c.status === "rejected").length;
+
+    return { total, pending, approved, rejected };
+  }, [claims]);
+
+  /* ========================= LOADING / ERROR ========================= */
 
   if (loading)
     return (
-      <div className="py-20 text-center text-gray-400">Loading claims…</div>
+      <div className="text-center py-10 text-gray-400">Loading claims…</div>
     );
 
-  return (
-    <div className="p-6 max-w-7xl mx-auto relative">
-      <h1 className="text-3xl font-bold text-ubGold mb-8">Claims Management</h1>
+  if (errorMsg)
+    return (
+      <div className="text-center py-10 text-red-400">
+        Failed to load claims: {errorMsg}
+      </div>
+    );
 
-      {/* Toast */}
-      {toastOpen && toastMsg && (
-        <div className="fixed top-6 right-6 bg-green-600 text-white px-5 py-3 rounded shadow-lg">
-          {toastMsg}
+  /* ========================= LIST VIEW ========================= */
+
+  if (!selectedClaim) {
+    return (
+      <div className="p-6 max-w-7xl mx-auto">
+        <h1 className="text-3xl font-bold text-ubGold mb-6">
+          Claims Management
+        </h1>
+
+        {/* Filters + Counters */}
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
+          <div className="flex gap-2 flex-wrap items-center">
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by item, campus, user, category…"
+              className="w-72 px-3 py-2 rounded-md bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 outline-none focus:ring-2 focus:ring-ubGold text-sm"
+            />
+            <select
+              value={statusFilter}
+              onChange={(e) =>
+                setStatusFilter(
+                  e.target.value as "all" | "pending" | "approved" | "rejected"
+                )
+              }
+              className="px-3 py-2 rounded-md bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 text-sm outline-none focus:ring-2 focus:ring-ubGold"
+            >
+              <option value="all">All statuses</option>
+              <option value="pending">Pending</option>
+              <option value="approved">Approved</option>
+              <option value="rejected">Rejected</option>
+            </select>
+          </div>
+
+          {/* Realtime counters */}
+          <div className="flex flex-wrap gap-2 text-xs md:text-sm">
+            <span className="px-3 py-1 rounded-full bg-gray-200 dark:bg-gray-800 text-gray-800 dark:text-gray-100">
+              Total: <b>{stats.total}</b>
+            </span>
+            <span className="px-3 py-1 rounded-full bg-yellow-100 text-yellow-900 dark:bg-yellow-900 dark:text-yellow-200">
+              Pending: <b>{stats.pending}</b>
+            </span>
+            <span className="px-3 py-1 rounded-full bg-green-100 text-green-900 dark:bg-green-900 dark:text-green-200">
+              Approved: <b>{stats.approved}</b>
+            </span>
+            <span className="px-3 py-1 rounded-full bg-red-100 text-red-900 dark:bg-red-900 dark:text-red-200">
+              Rejected: <b>{stats.rejected}</b>
+            </span>
+          </div>
         </div>
-      )}
 
-      {/* Filters */}
-      {!selectedClaim && (
-        <div className="flex flex-wrap items-center gap-3 mb-6">
-          <input
-            placeholder="Search claims…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="px-3 py-2 rounded border bg-gray-900 border-gray-700 text-white w-80"
-          />
-
-          <select
-            value={statusFilter}
-            onChange={(e) =>
-              setStatusFilter(
-                e.target.value as "all" | "pending" | "approved" | "rejected"
-              )
-            }
-            className="px-3 py-2 rounded border bg-gray-900 border-gray-700 text-white"
-          >
-            <option value="all">All</option>
-            <option value="pending">Pending</option>
-            <option value="approved">Approved</option>
-            <option value="rejected">Rejected</option>
-          </select>
-        </div>
-      )}
-
-      {/* LIST VIEW */}
-      {!selectedClaim && (
-        <div className="overflow-x-auto bg-gray-900 rounded-xl border border-gray-700 shadow">
+        {/* Table */}
+        <div className="bg-gray-900 rounded-xl shadow border border-gray-700 overflow-hidden">
           <table className="min-w-full text-sm">
-            <thead className="bg-gray-800 text-gray-300">
+            <thead className="bg-gray-700 text-gray-200">
               <tr>
-                <th className="px-5 py-3">Item</th>
-                <th className="px-5 py-3">Campus</th>
-                <th className="px-5 py-3">Category</th>
-                <th className="px-5 py-3">Claimant</th>
-                <th className="px-5 py-3">Message</th>
-                <th className="px-5 py-3">Status</th>
-                <th className="px-5 py-3 text-center">Actions</th>
+                <th className="px-4 py-3 text-left">Item</th>
+                <th className="px-4 py-3 text-left">Campus</th>
+                <th className="px-4 py-3 text-left">User</th>
+                <th className="px-4 py-3 text-left">Category</th>
+                <th className="px-4 py-3 text-left">Status</th>
+                <th className="px-4 py-3 text-center">Actions</th>
               </tr>
             </thead>
-
             <tbody>
-              {filteredClaims.map((c) => (
-                <tr
-                  key={c.id}
-                  className="border-b border-gray-700 hover:bg-gray-800"
-                >
-                  <td className="px-5 py-3 text-ubGold font-semibold">
-                    {c.items?.name}
-                  </td>
-
-                  <td className="px-5 py-3">
-                    {c.items?.campuses?.name ?? "—"}
-                  </td>
-
-                  <td className="px-5 py-3">
-                    {c.items?.categories?.name ?? "—"}
-                  </td>
-
-                  <td className="px-5 py-3">
-                    {c.profiles?.email || c.profiles?.full_name || "—"}
-                  </td>
-
-                  <td className="px-5 py-3 text-gray-400 max-w-xs truncate">
-                    {c.message ?? "—"}
-                  </td>
-
-                  <td className="px-5 py-3">
-                    <span
-                      className={`px-3 py-1 rounded-full text-xs font-bold ${
-                        (c.status ?? "pending") === "approved"
-                          ? "bg-green-600"
-                          : (c.status ?? "pending") === "rejected"
-                          ? "bg-red-600"
-                          : "bg-yellow-500"
-                      } text-white`}
-                    >
-                      {c.status ?? "pending"}
-                    </span>
-                  </td>
-
-                  <td className="px-5 py-3 text-center flex gap-2 justify-center">
-                    <button
-                      onClick={() => setSelectedClaim(c)}
-                      className="px-3 py-1 bg-blue-600 text-white rounded"
-                    >
-                      Chat
-                    </button>
-
-                    <button
-                      onClick={() => updateClaimStatus(c.id, "approved")}
-                      disabled={actionLoading !== null}
-                      className="px-3 py-1 bg-green-600 text-white rounded disabled:opacity-50"
-                    >
-                      Approve
-                    </button>
-
-                    <button
-                      onClick={() => updateClaimStatus(c.id, "rejected")}
-                      disabled={actionLoading !== null}
-                      className="px-3 py-1 bg-red-600 text-white rounded disabled:opacity-50"
-                    >
-                      Reject
-                    </button>
-                  </td>
-                </tr>
-              ))}
-
               {filteredClaims.length === 0 && (
                 <tr>
                   <td
-                    colSpan={7}
-                    className="text-center py-10 text-gray-400"
+                    colSpan={6}
+                    className="py-6 text-center text-gray-500"
                   >
-                    No claims found.
+                    No claims match your filters.
                   </td>
                 </tr>
               )}
+
+              {filteredClaims.map((c) => {
+                const effectiveStatus = c.status || "pending";
+                const canMarkReturned =
+                  effectiveStatus === "approved" &&
+                  c.item?.status !== "Claimed";
+
+                return (
+                  <tr
+                    key={c.id}
+                    className="border-b border-gray-800 hover:bg-gray-800/80 transition"
+                  >
+                    <td className="px-4 py-3 font-semibold text-ubGold">
+                      {c.item?.name || "—"}
+                    </td>
+                    <td className="px-4 py-3">
+                      {c.campus || "—"}
+                    </td>
+                    <td className="px-4 py-3">
+                      {c.user?.email || c.user?.full_name || "—"}
+                    </td>
+                    <td className="px-4 py-3">
+                      {c.category || "—"}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                          effectiveStatus === "approved"
+                            ? "bg-green-600 text-white"
+                            : effectiveStatus === "rejected"
+                            ? "bg-red-600 text-white"
+                            : "bg-yellow-500 text-black"
+                        }`}
+                      >
+                        {effectiveStatus}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-wrap gap-2 justify-center">
+                        <button
+                          onClick={() => setSelectedClaim(c)}
+                          className="px-3 py-1 bg-blue-600 text-white rounded text-xs"
+                        >
+                          Chat
+                        </button>
+
+                        <button
+                          onClick={() =>
+                            updateClaimStatus(c.id, "approved")
+                          }
+                          disabled={busyStatusId === c.id}
+                          className="px-3 py-1 bg-green-600 text-white rounded text-xs disabled:opacity-50"
+                        >
+                          {busyStatusId === c.id ? "…" : "Approve"}
+                        </button>
+
+                        <button
+                          onClick={() =>
+                            updateClaimStatus(c.id, "rejected")
+                          }
+                          disabled={busyStatusId === c.id}
+                          className="px-3 py-1 bg-red-600 text-white rounded text-xs disabled:opacity-50"
+                        >
+                          {busyStatusId === c.id ? "…" : "Reject"}
+                        </button>
+
+                        {canMarkReturned && (
+                          <button
+                            onClick={() => markItemReturned(c)}
+                            disabled={busyReturnId === c.id}
+                            className="px-3 py-1 bg-ubGold text-black rounded text-xs disabled:opacity-50"
+                          >
+                            {busyReturnId === c.id
+                              ? "Marking…"
+                              : "Mark Returned"}
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
-      )}
+      </div>
+    );
+  }
 
-      {/* CHAT VIEW */}
-      {selectedClaim && (
-        <div className="max-w-3xl mx-auto bg-gray-900 rounded-xl mt-6 border border-gray-700 shadow">
-          <div className="flex justify-between items-center bg-gray-800 px-5 py-4">
-            <div>
-              <h2 className="text-lg font-bold text-ubGold">
-                {selectedClaim.items?.name}
-              </h2>
-              <p className="text-xs text-gray-400">
-                {selectedClaim.profiles?.email} •{" "}
-                {selectedClaim.items?.campuses?.name}
+  /* ========================= CHAT VIEW ========================= */
+
+  return (
+    <div className="p-6 max-w-4xl mx-auto">
+      <button
+        onClick={() => setSelectedClaim(null)}
+        className="mb-4 px-4 py-2 bg-gray-800 text-white rounded"
+      >
+        ← Back
+      </button>
+
+      <div className="bg-gray-900 p-4 rounded-xl border border-gray-700 shadow">
+        <div className="flex justify-between items-start gap-4 mb-3">
+          <div>
+            <h2 className="text-xl font-bold text-white mb-1">
+              {selectedClaim.item?.name}
+            </h2>
+            <p className="text-gray-300 text-sm mb-1">
+              {selectedClaim.item?.description}
+            </p>
+            <p className="text-gray-400 text-xs">
+              📍 {selectedClaim.item?.location || "Unknown"} • 🏫{" "}
+              {selectedClaim.campus || "Unknown campus"}
+            </p>
+            {selectedClaim.message && (
+              <p className="text-sm text-gray-300 mt-2 italic">
+                “{selectedClaim.message}”
               </p>
-            </div>
-
-            <button
-              className="text-gray-300 hover:text-white"
-              onClick={() => setSelectedClaim(null)}
-            >
-              ← Back
-            </button>
+            )}
           </div>
 
-          {/* MESSAGES */}
-          <div className="p-4 h-[65vh] overflow-y-auto space-y-3">
-            {messages.map((msg) => {
-              const isAdmin = msg.is_admin;
+          <div className="flex flex-col gap-2 items-end">
+            <span
+              className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                (selectedClaim.status || "pending") === "approved"
+                  ? "bg-green-600 text-white"
+                  : (selectedClaim.status || "pending") === "rejected"
+                  ? "bg-red-600 text-white"
+                  : "bg-yellow-500 text-black"
+              }`}
+            >
+              {selectedClaim.status || "pending"}
+            </span>
 
-              return (
+            {/* Mark returned also visible inside chat */}
+            {(selectedClaim.status || "pending") === "approved" &&
+              selectedClaim.item?.status !== "Claimed" && (
+                <button
+                  onClick={() => markItemReturned(selectedClaim)}
+                  disabled={busyReturnId === selectedClaim.id}
+                  className="px-3 py-1 bg-ubGold text-black rounded text-xs disabled:opacity-50"
+                >
+                  {busyReturnId === selectedClaim.id
+                    ? "Marking…"
+                    : "Mark Item Returned"}
+                </button>
+              )}
+          </div>
+        </div>
+
+        <div className="h-[50vh] overflow-y-auto space-y-3 mb-4 p-2 border-t border-b border-gray-700">
+          {messages.map((msg) => {
+            const isAdmin =
+              msg.profiles?.email &&
+              !msg.profiles.email.endsWith("@ub.edu.bz");
+
+            return (
+              <div
+                key={msg.id}
+                className={`flex ${isAdmin ? "justify-end" : "justify-start"}`}
+              >
                 <div
-                  key={msg.id}
-                  className={`flex ${
-                    isAdmin ? "justify-end" : "justify-start"
+                  className={`p-3 rounded-xl max-w-[70%] ${
+                    isAdmin
+                      ? "bg-ubGold text-black"
+                      : "bg-gray-800 text-white"
                   }`}
                 >
-                  <div
-                    className={`p-3 rounded-xl max-w-[70%] ${
-                      isAdmin
-                        ? "bg-ubGold text-black"
-                        : "bg-gray-800 text-white border border-gray-700"
-                    }`}
-                  >
-                    <div className="text-xs text-gray-700 mb-1">
-                      {isAdmin ? "Admin" : msg.profiles?.email}
-                    </div>
-
-                    <p>{msg.content}</p>
-
-                    <div className="text-[10px] opacity-60 mt-1">
+                  <div className="flex justify-between mb-1">
+                    <span className="text-xs opacity-70">
+                      {isAdmin ? "Admin" : msg.profiles?.email || "User"}
+                    </span>
+                    <span className="text-[10px] opacity-70">
                       {new Date(msg.created_at).toLocaleTimeString([], {
                         hour: "2-digit",
                         minute: "2-digit",
                       })}
-                    </div>
+                    </span>
                   </div>
+                  <p className="text-sm">{msg.content}</p>
                 </div>
-              );
-            })}
-
-            <div ref={messagesEndRef} />
-          </div>
-
-          {/* INPUT */}
-          <form
-            onSubmit={sendMessage}
-            className="flex gap-2 border-t border-gray-700 p-4 bg-gray-800"
-          >
-            <input
-              type="text"
-              value={newMessage}
-              onChange={(e) => setNewMessage(e.target.value)}
-              placeholder="Type a message..."
-              className="flex-1 px-4 py-2 rounded bg-gray-900 border border-gray-700 text-white"
-            />
-            <button
-              type="submit"
-              className="bg-ubGold text-black px-4 py-2 rounded"
-            >
-              Send
-            </button>
-          </form>
+              </div>
+            );
+          })}
+          <div ref={messagesEndRef} />
         </div>
-      )}
+
+        <form
+          onSubmit={sendMessage}
+          className="flex gap-2 border-t border-gray-700 pt-3"
+        >
+          <input
+            type="text"
+            value={newMessage}
+            onChange={(e) => setNewMessage(e.target.value)}
+            placeholder="Type your message…"
+            className="flex-1 px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-white outline-none focus:ring-2 focus:ring-ubGold"
+          />
+          <button
+            type="submit"
+            className="px-4 py-2 bg-ubGold text-black rounded-lg font-semibold hover:bg-yellow-400"
+          >
+            Send
+          </button>
+        </form>
+      </div>
     </div>
   );
 }
