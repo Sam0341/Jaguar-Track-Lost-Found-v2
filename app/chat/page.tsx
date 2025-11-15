@@ -20,7 +20,6 @@ export default function AdminChatPage({ params }: { params: { id: string } }) {
   const [claimData, setClaimData] = useState<any>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll chat
   const scrollToBottom = () => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   };
@@ -34,41 +33,57 @@ export default function AdminChatPage({ params }: { params: { id: string } }) {
     };
   }, []);
 
-  // LOAD CLAIM + ITEM + USER
   async function loadChat() {
+    // STEP 1 — Fetch claim ONLY
     const { data: claim, error: claimErr } = await supabase
       .from("claims")
-      .select(
-        `
-        id,
-        status,
-        created_at,
-        message,
-
-        item: item_id (
-          name,
-          description,
-          image,
-          campus:campus_id (name)
-        ),
-
-        user: claimed_by (
-          email
-        )
-      `
-      )
+      .select("*")
       .eq("id", claimId)
       .single();
 
-    if (claimErr) console.error("Claim Load Error:", claimErr);
+    if (!claim || claimErr) {
+      console.error("Failed to load claim", claimErr);
+      return;
+    }
 
-    setClaimData(claim);
+    // STEP 2 — Fetch item separately
+    const { data: item, error: itemErr } = await supabase
+      .from("items")
+      .select("name, description, image, campus_id")
+      .eq("id", claim.item_id)
+      .single();
 
-    // LOAD MESSAGES
-    const { data: msgs, error: msgErr } = await supabase
+    // STEP 3 — Fetch campus separately
+    let campus = null;
+    if (item?.campus_id) {
+      const { data: c } = await supabase
+        .from("campuses")
+        .select("name")
+        .eq("id", item.campus_id)
+        .single();
+
+      campus = c;
+    }
+
+    // STEP 4 — Fetch user separately
+    const { data: userProfile } = await supabase
+      .from("profiles")
+      .select("email")
+      .eq("id", claim.claimed_by)
+      .single();
+
+    // Build final claim object
+    setClaimData({
+      ...claim,
+      item,
+      campus,
+      user: userProfile,
+    });
+
+    // STEP 5 — Load messages
+    const { data: msgs } = await supabase
       .from("messages")
-      .select(
-        `
+      .select(`
         id,
         claim_id,
         sender_id,
@@ -76,41 +91,27 @@ export default function AdminChatPage({ params }: { params: { id: string } }) {
         created_at,
         is_admin,
         sender:sender_id ( email )
-      `
-      )
+      `)
       .eq("claim_id", claimId)
       .order("created_at", { ascending: true });
-
-    if (msgErr) console.error("Messages Load Error:", msgErr);
 
     if (msgs) {
       const normalized = msgs.map((m: any) => ({
         ...m,
-        sender:
-          m.sender && typeof m.sender === "object"
-            ? m.sender
-            : Array.isArray(m.sender)
-            ? m.sender[0] ?? null
-            : null,
-      })) as Message[];
-
+        sender: Array.isArray(m.sender) ? m.sender[0] : m.sender,
+      }));
       setMessages(normalized);
     }
 
     scrollToBottom();
   }
 
-  // REALTIME UPDATES
   function subscribeToRealtime() {
     supabase
-      .channel("messages-realtime")
+      .channel("messages-admin-realtime")
       .on(
         "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "messages",
-        },
+        { event: "INSERT", table: "messages", schema: "public" },
         (payload) => {
           if (payload.new.claim_id === claimId) {
             setMessages((prev) => [...prev, payload.new as Message]);
@@ -121,14 +122,11 @@ export default function AdminChatPage({ params }: { params: { id: string } }) {
       .subscribe();
   }
 
-  // ADMIN SEND MESSAGE
   async function sendMessage() {
-    if (reply.trim().length === 0) return;
+    if (!reply.trim()) return;
 
     const { data: auth } = await supabase.auth.getUser();
     const adminId = auth?.user?.id;
-
-    if (!adminId) return;
 
     await supabase.from("messages").insert({
       claim_id: claimId,
@@ -142,19 +140,17 @@ export default function AdminChatPage({ params }: { params: { id: string } }) {
   }
 
   if (!claimData) {
-    return (
-      <div className="p-10 text-gray-400 text-center">Loading chat…</div>
-    );
+    return <div className="p-10 text-gray-400 text-center">Loading chat…</div>;
   }
 
   return (
     <div className="max-w-3xl mx-auto p-6">
       <h2 className="text-3xl font-bold text-ubGold mb-4">Admin Chat</h2>
 
-      {/* CLAIM INFO */}
+      {/* CLAIM SUMMARY */}
       <div className="bg-gray-900 p-4 rounded-lg border border-gray-700 mb-6">
         <h3 className="text-xl text-white font-bold mb-1">
-          {claimData.item?.name || "Unknown Item"}
+          {claimData.item?.name}
         </h3>
 
         <p className="text-gray-400 text-sm">
@@ -162,7 +158,7 @@ export default function AdminChatPage({ params }: { params: { id: string } }) {
         </p>
 
         <p className="text-gray-400 text-sm mt-1">
-          Campus: {claimData.item?.campus?.name || "N/A"}
+          Campus: {claimData.campus?.name || "N/A"}
         </p>
 
         <span
@@ -190,24 +186,15 @@ export default function AdminChatPage({ params }: { params: { id: string } }) {
             }`}
           >
             <p>{msg.content}</p>
-
-            {/* SENDER INFO */}
-            {!msg.is_admin && (
-              <p className="text-xs text-gray-300 mt-1">
-                {msg.sender?.email || "Unknown User"}
-              </p>
-            )}
-
             <p className="text-xs text-gray-300 mt-1">
               {new Date(msg.created_at).toLocaleString()}
             </p>
           </div>
         ))}
-
         <div ref={bottomRef} />
       </div>
 
-      {/* INPUT */}
+      {/* MESSAGE INPUT */}
       <div className="mt-4 flex gap-3">
         <input
           className="flex-1 px-4 py-2 rounded-lg bg-gray-900 border border-gray-700 text-white outline-none"
