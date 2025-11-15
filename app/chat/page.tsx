@@ -34,32 +34,38 @@ export default function AdminChatPage({ params }: { params: { id: string } }) {
     };
   }, []);
 
+  // LOAD CLAIM + ITEM + USER
   async function loadChat() {
-    // Fetch claim + item + user
-    const { data: claim } = await supabase
+    const { data: claim, error: claimErr } = await supabase
       .from("claims")
-      .select(`
+      .select(
+        `
         id,
         status,
         created_at,
         message,
-        items:item_id (
+
+        item: item_id (
           name,
           description,
           image,
-          campus:campus_id(name)
+          campus:campus_id (name)
         ),
-        user:claimed_by (
+
+        user: claimed_by (
           email
         )
-      `)
+      `
+      )
       .eq("id", claimId)
       .single();
 
+    if (claimErr) console.error("Claim Load Error:", claimErr);
+
     setClaimData(claim);
 
-    // Fetch messages
-    const { data: msgs } = await supabase
+    // LOAD MESSAGES
+    const { data: msgs, error: msgErr } = await supabase
       .from("messages")
       .select(
         `
@@ -75,15 +81,17 @@ export default function AdminChatPage({ params }: { params: { id: string } }) {
       .eq("claim_id", claimId)
       .order("created_at", { ascending: true });
 
+    if (msgErr) console.error("Messages Load Error:", msgErr);
+
     if (msgs) {
-      const normalized = (msgs as any[]).map((m) => ({
-        id: m.id,
-        claim_id: m.claim_id,
-        sender_id: m.sender_id,
-        content: m.content,
-        created_at: m.created_at,
-        is_admin: m.is_admin,
-        sender: Array.isArray(m.sender) ? m.sender[0] ?? null : m.sender ?? null,
+      const normalized = msgs.map((m: any) => ({
+        ...m,
+        sender:
+          m.sender && typeof m.sender === "object"
+            ? m.sender
+            : Array.isArray(m.sender)
+            ? m.sender[0] ?? null
+            : null,
       })) as Message[];
 
       setMessages(normalized);
@@ -92,13 +100,17 @@ export default function AdminChatPage({ params }: { params: { id: string } }) {
     scrollToBottom();
   }
 
-  // Realtime chat
+  // REALTIME UPDATES
   function subscribeToRealtime() {
     supabase
       .channel("messages-realtime")
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "messages" },
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "messages",
+        },
         (payload) => {
           if (payload.new.claim_id === claimId) {
             setMessages((prev) => [...prev, payload.new as Message]);
@@ -109,12 +121,14 @@ export default function AdminChatPage({ params }: { params: { id: string } }) {
       .subscribe();
   }
 
-  // ADMIN SENDS MESSAGE
+  // ADMIN SEND MESSAGE
   async function sendMessage() {
     if (reply.trim().length === 0) return;
 
     const { data: auth } = await supabase.auth.getUser();
     const adminId = auth?.user?.id;
+
+    if (!adminId) return;
 
     await supabase.from("messages").insert({
       claim_id: claimId,
@@ -137,10 +151,10 @@ export default function AdminChatPage({ params }: { params: { id: string } }) {
     <div className="max-w-3xl mx-auto p-6">
       <h2 className="text-3xl font-bold text-ubGold mb-4">Admin Chat</h2>
 
-      {/* CLAIM TOP SECTION */}
+      {/* CLAIM INFO */}
       <div className="bg-gray-900 p-4 rounded-lg border border-gray-700 mb-6">
         <h3 className="text-xl text-white font-bold mb-1">
-          {claimData.items?.name || "Unknown Item"}
+          {claimData.item?.name || "Unknown Item"}
         </h3>
 
         <p className="text-gray-400 text-sm">
@@ -148,7 +162,7 @@ export default function AdminChatPage({ params }: { params: { id: string } }) {
         </p>
 
         <p className="text-gray-400 text-sm mt-1">
-          Campus: {claimData.items?.campus?.name || "N/A"}
+          Campus: {claimData.item?.campus?.name || "N/A"}
         </p>
 
         <span
@@ -176,6 +190,14 @@ export default function AdminChatPage({ params }: { params: { id: string } }) {
             }`}
           >
             <p>{msg.content}</p>
+
+            {/* SENDER INFO */}
+            {!msg.is_admin && (
+              <p className="text-xs text-gray-300 mt-1">
+                {msg.sender?.email || "Unknown User"}
+              </p>
+            )}
+
             <p className="text-xs text-gray-300 mt-1">
               {new Date(msg.created_at).toLocaleString()}
             </p>
@@ -185,7 +207,7 @@ export default function AdminChatPage({ params }: { params: { id: string } }) {
         <div ref={bottomRef} />
       </div>
 
-      {/* MESSAGE INPUT */}
+      {/* INPUT */}
       <div className="mt-4 flex gap-3">
         <input
           className="flex-1 px-4 py-2 rounded-lg bg-gray-900 border border-gray-700 text-white outline-none"
