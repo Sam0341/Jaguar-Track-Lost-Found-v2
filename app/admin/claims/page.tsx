@@ -48,13 +48,7 @@ type Message = {
   sender_id: string;
   content: string;
   created_at: string;
-  is_admin?: boolean;
-  profiles?:
-    | {
-        full_name: string | null;
-        email: string | null;
-      }
-    | null;
+  profiles?: { full_name: string | null; email: string | null };
 };
 
 /* -------------------------------------------------------------------------- */
@@ -86,7 +80,6 @@ export default function AdminClaimsPage() {
     setErrorMsg(null);
 
     try {
-      // 1️⃣ Load raw claims
       const { data: claimRows, error: claimErr } = await supabase
         .from("claims")
         .select("*")
@@ -96,7 +89,6 @@ export default function AdminClaimsPage() {
 
       const final: ClaimView[] = [];
 
-      // 2️⃣ For each claim, join items + user + campus + category manually
       for (const row of claimRows as ClaimRow[]) {
         const { data: item } = await supabase
           .from("items")
@@ -128,7 +120,6 @@ export default function AdminClaimsPage() {
                 .single()
             : { data: null };
 
-        // 3️⃣ Fix image URL
         let imageUrl: string | null = null;
         if (item?.image) {
           const { data: url } = supabase.storage
@@ -166,7 +157,6 @@ export default function AdminClaimsPage() {
   useEffect(() => {
     setLoading(true);
     fetchClaims();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /* ========================= REALTIME DASHBOARD ========================= */
@@ -175,14 +165,13 @@ export default function AdminClaimsPage() {
     const channel = supabase
       .channel("admin-claims-dashboard")
       .on(
-        "postgres_changes" as any,
+        "postgres_changes",
         {
           schema: "public",
           table: "claims",
           event: "*",
-        } as any,
+        },
         () => {
-          // whenever a claim is inserted/updated/deleted, refresh dashboard
           fetchClaims();
         }
       )
@@ -191,7 +180,6 @@ export default function AdminClaimsPage() {
     return () => {
       supabase.removeChannel(channel);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /* ========================= CHAT: LOAD MESSAGES ========================= */
@@ -202,60 +190,28 @@ export default function AdminClaimsPage() {
     const claimId = selectedClaim.id;
 
     async function loadMessages() {
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from("messages")
         .select("*, profiles:sender_id(full_name,email)")
         .eq("claim_id", claimId)
         .order("created_at", { ascending: true });
 
-      if (error) {
-        console.error("Load messages error:", error);
-        setMessages([]);
-        return;
-      }
-
-      // ✅ Normalize profiles (Supabase returns an array)
-      const normalized = (data || []).map((m: any) => ({
-        ...m,
-        profiles: Array.isArray(m.profiles) ? m.profiles[0] : m.profiles,
-      }));
-
-      setMessages(normalized);
+      setMessages(data || []);
     }
 
     loadMessages();
-
     const channel = supabase
       .channel(`claim-${claimId}`)
       .on(
-        "postgres_changes" as any,
+        "postgres_changes",
         {
           event: "INSERT",
           table: "messages",
           schema: "public",
           filter: `claim_id=eq.${claimId}`,
-        } as any,
-        // ✅ When a new message arrives, refetch *that* message with profile join
-        async (payload: any) => {
-          const newId = payload.new?.id;
-          if (!newId) return;
-
-          const { data, error } = await supabase
-            .from("messages")
-            .select("*, profiles:sender_id(full_name,email)")
-            .eq("id", newId)
-            .single();
-
-          if (error || !data) return;
-
-          const normalized: Message = {
-            ...(data as any),
-            profiles: Array.isArray((data as any).profiles)
-              ? (data as any).profiles[0]
-              : (data as any).profiles,
-          };
-
-          setMessages((prev) => [...prev, normalized]);
+        },
+        (payload) => {
+          setMessages((prev) => [...prev, payload.new as Message]);
         }
       )
       .subscribe();
@@ -317,10 +273,10 @@ export default function AdminClaimsPage() {
 
   /* ========================= MARK ITEM RETURNED ========================= */
 
-  async function markItemReturned(claim: ClaimView) {
-    if (!claim.item) return;
+  async function markItemReturned(c: ClaimView) {
+    if (!c.item) return;
 
-    setBusyReturnId(claim.id);
+    setBusyReturnId(c.id);
     try {
       const nowIso = new Date().toISOString();
 
@@ -328,34 +284,31 @@ export default function AdminClaimsPage() {
         data: { user: admin },
       } = await supabase.auth.getUser();
 
-      // 1) Update item as claimed/returned
       const itemUpdate: any = {
         status: "Claimed",
         claimed_at: nowIso,
       };
-      if (claim.user?.id) itemUpdate.claimed_by = claim.user.id;
+      if (c.user?.id) itemUpdate.claimed_by = c.user.id;
 
       const { error: itemErr } = await supabase
         .from("items")
         .update(itemUpdate)
-        .eq("id", claim.item.id);
+        .eq("id", c.item.id);
 
       if (itemErr) throw itemErr;
 
-      // 2) Ensure claim is approved
-      if (claim.status !== "approved") {
+      if (c.status !== "approved") {
         await supabase
           .from("claims")
           .update({ status: "approved" })
-          .eq("id", claim.id);
+          .eq("id", c.id);
       }
 
-      // 3) Log action
       if (admin?.id) {
         await supabase.from("logs").insert([
           {
             action: "item_returned",
-            item_id: claim.item.id,
+            item_id: c.item.id,
             performed_by: admin.id,
             timestamp: nowIso,
           },
@@ -414,7 +367,9 @@ export default function AdminClaimsPage() {
 
   if (loading)
     return (
-      <div className="text-center py-10 text-gray-400">Loading claims…</div>
+      <div className="text-center py-10 text-gray-400">
+        Loading claims…
+      </div>
     );
 
   if (errorMsg)
@@ -433,7 +388,6 @@ export default function AdminClaimsPage() {
           Claims Management
         </h1>
 
-        {/* Filters + Counters */}
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
           <div className="flex gap-2 flex-wrap items-center">
             <input
@@ -446,11 +400,7 @@ export default function AdminClaimsPage() {
               value={statusFilter}
               onChange={(e) =>
                 setStatusFilter(
-                  e.target.value as
-                    | "all"
-                    | "pending"
-                    | "approved"
-                    | "rejected"
+                  e.target.value as "all" | "pending" | "approved" | "rejected"
                 )
               }
               className="px-3 py-2 rounded-md bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 text-sm outline-none focus:ring-2 focus:ring-ubGold"
@@ -462,7 +412,6 @@ export default function AdminClaimsPage() {
             </select>
           </div>
 
-          {/* Realtime counters */}
           <div className="flex flex-wrap gap-2 text-xs md:text-sm">
             <span className="px-3 py-1 rounded-full bg-gray-200 dark:bg-gray-800 text-gray-800 dark:text-gray-100">
               Total: <b>{stats.total}</b>
@@ -479,7 +428,6 @@ export default function AdminClaimsPage() {
           </div>
         </div>
 
-        {/* Table */}
         <div className="bg-gray-900 rounded-xl shadow border border-gray-700 overflow-hidden">
           <table className="min-w-full text-sm">
             <thead className="bg-gray-700 text-gray-200">
@@ -636,7 +584,6 @@ export default function AdminClaimsPage() {
               {selectedClaim.status || "pending"}
             </span>
 
-            {/* Mark returned also visible inside chat */}
             {(selectedClaim.status || "pending") === "approved" &&
               selectedClaim.item?.status !== "Claimed" && (
                 <button
@@ -654,8 +601,7 @@ export default function AdminClaimsPage() {
 
         <div className="h-[50vh] overflow-y-auto space-y-3 mb-4 p-2 border-t border-b border-gray-700">
           {messages.map((msg) => {
-            // ✅ use is_admin flag from DB
-            const isAdmin = msg.is_admin === true;
+            const isAdmin = msg.sender_id !== selectedClaim.user?.id;
 
             return (
               <div
