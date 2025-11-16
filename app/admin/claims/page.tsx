@@ -3,14 +3,15 @@
 import { useEffect, useState, useRef } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
-// TYPES
+// TYPES BASED ON YOUR NEW SCHEMA 🔥🔥
 type Item = {
   id: string;
   name: string;
-  campus: string | null;
   description: string | null;
-  image: string | null;
   location: string | null;
+  image: string | null;
+  campus_id: string | null;
+  category_id: string | null;
 };
 
 type Claim = {
@@ -20,8 +21,11 @@ type Claim = {
   message: string | null;
   status: string | null;
   created_at: string;
-  item?: Item;
-  profiles?: { email: string | null; full_name: string | null };
+  item?: Item | null;
+  profiles?: {
+    full_name: string | null;
+    email: string | null;
+  };
 };
 
 type Message = {
@@ -33,7 +37,10 @@ type Message = {
   created_at: string;
   is_admin: boolean;
   seen: boolean;
-  profiles?: { full_name: string | null; email: string | null };
+  profiles?: {
+    full_name: string | null;
+    email: string | null;
+  };
 };
 
 export default function AdminClaimsPage() {
@@ -41,15 +48,15 @@ export default function AdminClaimsPage() {
   const [selectedClaim, setSelectedClaim] = useState<Claim | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
   const [newMessage, setNewMessage] = useState("");
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Scroll chat down
+  // Auto scroll chat
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Fetch all claims
+  // FETCH ALL CLAIMS (JOIN PROFILES + ITEMS) ✔️
   useEffect(() => {
     async function loadClaims() {
       const { data: claimRows } = await supabase
@@ -59,7 +66,7 @@ export default function AdminClaimsPage() {
 
       if (!claimRows) return setClaims([]);
 
-      const finalClaims: Claim[] = [];
+      const result: Claim[] = [];
 
       for (const claim of claimRows) {
         const { data: item } = await supabase
@@ -70,27 +77,32 @@ export default function AdminClaimsPage() {
 
         let imageUrl = null;
         if (item?.image) {
-          const { data: urlData } = supabase.storage
+          const { data: img } = supabase.storage
             .from("item-photos")
             .getPublicUrl(item.image);
 
-          imageUrl = urlData?.publicUrl || null;
+          imageUrl = img?.publicUrl ?? null;
         }
 
-        finalClaims.push({
+        result.push({
           ...claim,
-          item: item ? { ...item, image: imageUrl } : null,
+          item: item
+            ? {
+                ...item,
+                image: imageUrl,
+              }
+            : null,
         });
       }
 
-      setClaims(finalClaims);
+      setClaims(result);
       setLoading(false);
     }
 
     loadClaims();
   }, []);
 
-  // Load messages + realtime
+  // FETCH MESSAGES + REALTIME ✔️
   useEffect(() => {
     if (!selectedClaim) return;
 
@@ -112,7 +124,7 @@ export default function AdminClaimsPage() {
 
       setMessages(normalized);
 
-      // Auto mark ALL user messages as seen
+      // MARK USER MESSAGES AS SEEN
       await supabase
         .from("messages")
         .update({ seen: true })
@@ -127,19 +139,21 @@ export default function AdminClaimsPage() {
       .on(
         "postgres_changes" as any,
         { event: "INSERT", table: "messages", filter: `claim_id=eq.${claimId}` },
-        (payload) => {
-          setMessages((prev) => [...prev, payload.payload.new as Message]);
+        (payload: any) => {
+          // Supabase realtime payload may nest the row under payload.payload.new for broadcast events,
+          // fall back to payload.new if present.
+          const newRow = payload?.payload?.new ?? payload?.new;
+          setMessages((prev) => [...prev, newRow as Message]);
         }
       )
       .subscribe();
 
     return () => {
-      // removeChannel returns a Promise; call it without returning to keep cleanup synchronous
       void supabase.removeChannel(channel);
     };
   }, [selectedClaim]);
 
-  // Send text
+  // SEND TEXT MESSAGE ✔️
   async function sendMessage(e: any) {
     e.preventDefault();
     if (!newMessage.trim() || !selectedClaim) return;
@@ -148,26 +162,23 @@ export default function AdminClaimsPage() {
       data: { user },
     } = await supabase.auth.getUser();
 
-    if (!user) {
-      console.error("No authenticated user found");
-      return;
-    }
+    if (!user) return;
 
     await supabase.from("messages").insert([
       {
         claim_id: selectedClaim.id,
         sender_id: user.id,
         content: newMessage,
+        file_url: null,
         is_admin: true,
         seen: false,
-        file_url: null,
       },
     ]);
 
     setNewMessage("");
   }
 
-  // Send image
+  // SEND IMAGE ✔️
   async function sendImage(e: any) {
     const file = e.target.files?.[0];
     e.target.value = "";
@@ -182,7 +193,7 @@ export default function AdminClaimsPage() {
 
     if (error) return;
 
-    const { data } = await supabase.storage
+    const { data } = supabase.storage
       .from("chat-attachments")
       .getPublicUrl(path);
 
@@ -192,10 +203,7 @@ export default function AdminClaimsPage() {
       data: { user },
     } = await supabase.auth.getUser();
 
-    if (!user) {
-      console.error("No authenticated user found");
-      return;
-    }
+    if (!user) return;
 
     await supabase.from("messages").insert([
       {
@@ -203,13 +211,13 @@ export default function AdminClaimsPage() {
         sender_id: user.id,
         content: null,
         file_url: url,
-        seen: false,
         is_admin: true,
+        seen: false,
       },
     ]);
   }
 
-  // UI — LIST VIEW
+  // UI — CLAIM LIST VIEW
   if (!selectedClaim) {
     return (
       <div className="max-w-6xl mx-auto p-6">
@@ -238,15 +246,19 @@ export default function AdminClaimsPage() {
                 <h2 className="text-lg font-semibold text-white mt-2">
                   {c.item?.name}
                 </h2>
-                <p className="text-gray-400 text-sm">{c.profiles?.email}</p>
+
+                <p className="text-gray-400 text-sm">
+                  {c.profiles?.email || "Unknown User"}
+                </p>
+
                 <span
                   className={`inline-block mt-2 px-3 py-1 text-xs rounded-full ${
                     c.status === "approved"
                       ? "bg-green-600"
                       : c.status === "rejected"
                       ? "bg-red-600"
-                      : "bg-yellow-500"
-                  } text-white`}
+                      : "bg-yellow-600"
+                  }`}
                 >
                   {c.status}
                 </span>
@@ -276,51 +288,46 @@ export default function AdminClaimsPage() {
         {/* CHAT */}
         <div className="h-[60vh] overflow-y-auto space-y-4 p-2 border-y border-gray-700">
           {messages.map((msg) => {
-            const bubbleOwn = msg.is_admin;
+            const isMine = msg.is_admin;
+
             return (
               <div
                 key={msg.id}
-                className={`flex ${bubbleOwn ? "justify-end" : "justify-start"}`}
+                className={`flex ${isMine ? "justify-end" : "justify-start"}`}
               >
                 <div
                   className={`p-3 max-w-[70%] rounded-xl ${
-                    bubbleOwn
+                    isMine
                       ? "bg-ubGold text-black rounded-br-none"
                       : "bg-gray-800 text-white rounded-bl-none"
                   }`}
                 >
-                  {/* BADGE */}
-                  <span
-                    className={`text-[10px] px-2 py-1 rounded-full ${
-                      bubbleOwn
-                        ? "bg-black/20 text-black"
-                        : "bg-white/20 text-white"
-                    }`}
-                  >
-                    {bubbleOwn ? "Admin" : msg.profiles?.email || "User"}
+                  {/* Badge */}
+                  <span className="text-[10px] opacity-70">
+                    {isMine ? "Admin" : msg.profiles?.email}
                   </span>
 
-                  {/* TEXT */}
+                  {/* Text */}
                   {msg.content && (
                     <p className="mt-1 text-sm">{msg.content}</p>
                   )}
 
-                  {/* IMAGE */}
+                  {/* Image */}
                   {msg.file_url && (
                     <img
                       src={msg.file_url}
-                      className="mt-2 rounded-lg shadow border border-gray-700"
+                      className="mt-2 rounded-lg border border-gray-700"
                     />
                   )}
 
-                  {/* TIME + READ STATUS */}
+                  {/* Time */}
                   <div className="text-[10px] opacity-60 mt-1">
                     {new Date(msg.created_at).toLocaleTimeString([], {
                       hour: "2-digit",
                       minute: "2-digit",
                     })}
 
-                    {bubbleOwn && (
+                    {isMine && (
                       <span className="ml-2 text-blue-300">
                         {msg.seen ? "✓ Seen" : "✓ Sent"}
                       </span>
@@ -330,14 +337,12 @@ export default function AdminClaimsPage() {
               </div>
             );
           })}
+
           <div ref={messagesEndRef} />
         </div>
 
         {/* INPUT */}
-        <form
-          onSubmit={sendMessage}
-          className="flex items-center gap-3 pt-3"
-        >
+        <form onSubmit={sendMessage} className="flex items-center gap-3 pt-3">
           <label className="cursor-pointer bg-gray-800 px-3 py-2 rounded-lg border border-gray-700">
             📎
             <input type="file" className="hidden" onChange={sendImage} />
@@ -346,8 +351,8 @@ export default function AdminClaimsPage() {
           <input
             value={newMessage}
             onChange={(e) => setNewMessage(e.target.value)}
+            className="flex-1 px-3 py-2 bg-gray-800 rounded-lg border border-gray-700 text-white"
             placeholder="Type a message…"
-            className="flex-1 px-3 py-2 bg-gray-800 text-white rounded-lg border border-gray-700"
           />
 
           <button className="px-4 py-2 bg-ubGold text-black rounded-lg">
