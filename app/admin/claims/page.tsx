@@ -1,194 +1,96 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
-/* ---------------------------------- TYPES ---------------------------------- */
-
-type ItemData = {
+// TYPES
+type Item = {
   id: string;
   name: string;
+  campus: string | null;
   description: string | null;
-  location: string | null;
   image: string | null;
-  status: string | null;
-  campus_id: string | null;
-  category_id: string | null;
+  location: string | null;
 };
 
-type ProfileData = {
-  id: string;
-  full_name: string | null;
-  email: string | null;
-};
-
-type ClaimRow = {
+type Claim = {
   id: string;
   item_id: string;
   claimed_by: string;
   message: string | null;
   status: string | null;
   created_at: string;
-};
-
-type ClaimView = {
-  id: string;
-  message: string | null;
-  status: string | null;
-  created_at: string | null;
-  item: ItemData | null;
-  user: ProfileData | null;
-  campus: string | null;
-  category: string | null;
+  item?: Item;
+  profiles?: { email: string | null; full_name: string | null };
 };
 
 type Message = {
   id: string;
   claim_id: string;
   sender_id: string;
-  content: string;
+  content: string | null;
+  file_url: string | null;
   created_at: string;
+  is_admin: boolean;
+  seen: boolean;
   profiles?: { full_name: string | null; email: string | null };
 };
 
-/* -------------------------------------------------------------------------- */
-/*                                MAIN COMPONENT                              */
-/* -------------------------------------------------------------------------- */
-
 export default function AdminClaimsPage() {
-  const [claims, setClaims] = useState<ClaimView[]>([]);
-  const [selectedClaim, setSelectedClaim] = useState<ClaimView | null>(null);
-
+  const [claims, setClaims] = useState<Claim[]>([]);
+  const [selectedClaim, setSelectedClaim] = useState<Claim | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [loading, setLoading] = useState(true);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   const [newMessage, setNewMessage] = useState("");
 
-  const [loading, setLoading] = useState(true);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // Scroll chat down
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] =
-    useState<"all" | "pending" | "approved" | "rejected">("all");
-
-  const [busyStatusId, setBusyStatusId] = useState<string | null>(null);
-  const [busyReturnId, setBusyReturnId] = useState<string | null>(null);
-
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  /* ========================= FETCH ALL CLAIMS ========================= */
-
-  const fetchClaims = async () => {
-    setErrorMsg(null);
-
-    try {
-      // 1️⃣ Load raw claims
-      const { data: claimRows, error: claimErr } = await supabase
+  // Fetch all claims
+  useEffect(() => {
+    async function loadClaims() {
+      const { data: claimRows } = await supabase
         .from("claims")
-        .select("*")
+        .select("*, profiles:claimed_by(full_name,email)")
         .order("created_at", { ascending: false });
 
-      if (claimErr) throw claimErr;
+      if (!claimRows) return setClaims([]);
 
-      const final: ClaimView[] = [];
+      const finalClaims: Claim[] = [];
 
-      // 2️⃣ For each claim, join items + user + campus + category manually
-      for (const row of claimRows as ClaimRow[]) {
+      for (const claim of claimRows) {
         const { data: item } = await supabase
           .from("items")
           .select("*")
-          .eq("id", row.item_id)
+          .eq("id", claim.item_id)
           .single();
 
-        const { data: user } = await supabase
-          .from("profiles")
-          .select("id, full_name, email")
-          .eq("id", row.claimed_by)
-          .single();
-
-        const { data: campus } =
-          item?.campus_id
-            ? await supabase
-                .from("campuses")
-                .select("name")
-                .eq("id", item.campus_id)
-                .single()
-            : { data: null };
-
-        const { data: category } =
-          item?.category_id
-            ? await supabase
-                .from("categories")
-                .select("name")
-                .eq("id", item.category_id)
-                .single()
-            : { data: null };
-
-        // 3️⃣ Fix image URL
-        let imageUrl: string | null = null;
+        let imageUrl = null;
         if (item?.image) {
-          const { data: url } = supabase.storage
+          const { data: urlData } = supabase.storage
             .from("item-photos")
             .getPublicUrl(item.image);
-          imageUrl = url?.publicUrl || null;
+
+          imageUrl = urlData?.publicUrl || null;
         }
 
-        final.push({
-          id: row.id,
-          message: row.message,
-          status: row.status,
-          created_at: row.created_at,
-          item: item
-            ? {
-                ...item,
-                image: imageUrl,
-              }
-            : null,
-          user,
-          campus: campus?.name || null,
-          category: category?.name || null,
+        finalClaims.push({
+          ...claim,
+          item: item ? { ...item, image: imageUrl } : null,
         });
       }
 
-      setClaims(final);
-    } catch (err: any) {
-      console.error("Fetch claims error:", err);
-      setErrorMsg(err.message || "Failed to fetch claims");
-    } finally {
+      setClaims(finalClaims);
       setLoading(false);
     }
-  };
 
-  useEffect(() => {
-    setLoading(true);
-    fetchClaims();
+    loadClaims();
   }, []);
 
-  /* ========================= REALTIME DASHBOARD ========================= */
-
-  useEffect(() => {
-    const channel = supabase
-      .channel("admin-claims-dashboard")
-      .on(
-        "postgres_changes",
-        {
-          schema: "public",
-          table: "claims",
-          event: "*",
-        },
-        () => {
-          // whenever a claim is inserted/updated/deleted, refresh dashboard
-          fetchClaims();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  /* ========================= CHAT: LOAD MESSAGES ========================= */
-
+  // Load messages + realtime
   useEffect(() => {
     if (!selectedClaim) return;
 
@@ -197,11 +99,25 @@ export default function AdminClaimsPage() {
     async function loadMessages() {
       const { data } = await supabase
         .from("messages")
-        .select("*, profiles:sender_id(full_name,email)")
+        .select(
+          "id, claim_id, sender_id, content, file_url, created_at, is_admin, seen, profiles:sender_id(full_name,email)"
+        )
         .eq("claim_id", claimId)
         .order("created_at", { ascending: true });
 
-      setMessages(data || []);
+      const normalized = (data || []).map((m: any) => ({
+        ...m,
+        profiles: Array.isArray(m.profiles) ? m.profiles[0] : m.profiles,
+      }));
+
+      setMessages(normalized);
+
+      // Auto mark ALL user messages as seen
+      await supabase
+        .from("messages")
+        .update({ seen: true })
+        .eq("claim_id", claimId)
+        .eq("is_admin", false);
     }
 
     loadMessages();
@@ -209,437 +125,207 @@ export default function AdminClaimsPage() {
     const channel = supabase
       .channel(`claim-${claimId}`)
       .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          table: "messages",
-          schema: "public",
-          filter: `claim_id=eq.${claimId}`,
-        },
+        "postgres_changes" as any,
+        { event: "INSERT", table: "messages", filter: `claim_id=eq.${claimId}` },
         (payload) => {
-          setMessages((prev) => [...prev, payload.new as Message]);
+          setMessages((prev) => [...prev, payload.payload.new as Message]);
         }
       )
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      // removeChannel returns a Promise; call it without returning to keep cleanup synchronous
+      void supabase.removeChannel(channel);
     };
   }, [selectedClaim]);
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  /* ========================= SEND MESSAGE (ADMIN) ========================= */
-
-  async function sendMessage(e: React.FormEvent) {
+  // Send text
+  async function sendMessage(e: any) {
     e.preventDefault();
-    if (!selectedClaim || !newMessage.trim()) return;
+    if (!newMessage.trim() || !selectedClaim) return;
 
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    if (!user) return;
+
+    if (!user) {
+      console.error("No authenticated user found");
+      return;
+    }
 
     await supabase.from("messages").insert([
       {
         claim_id: selectedClaim.id,
         sender_id: user.id,
-        content: newMessage.trim(),
+        content: newMessage,
         is_admin: true,
+        seen: false,
+        file_url: null,
       },
     ]);
 
     setNewMessage("");
   }
 
-  /* ========================= APPROVE / REJECT ========================= */
+  // Send image
+  async function sendImage(e: any) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !selectedClaim) return;
 
-  async function updateClaimStatus(
-    id: string,
-    status: "approved" | "rejected"
-  ) {
-    setBusyStatusId(id);
-    try {
-      const { error } = await supabase
-        .from("claims")
-        .update({ status })
-        .eq("id", id);
+    const ext = file.name.split(".").pop();
+    const path = `${selectedClaim.id}/${Date.now()}.${ext}`;
 
-      if (error) throw error;
+    const { error } = await supabase.storage
+      .from("chat-attachments")
+      .upload(path, file);
 
-      await fetchClaims();
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setBusyStatusId(null);
+    if (error) return;
+
+    const { data } = await supabase.storage
+      .from("chat-attachments")
+      .getPublicUrl(path);
+
+    const url = data?.publicUrl;
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      console.error("No authenticated user found");
+      return;
     }
+
+    await supabase.from("messages").insert([
+      {
+        claim_id: selectedClaim.id,
+        sender_id: user.id,
+        content: null,
+        file_url: url,
+        seen: false,
+        is_admin: true,
+      },
+    ]);
   }
 
-  /* ========================= MARK ITEM RETURNED ========================= */
-
-  async function markItemReturned(claim: ClaimView) {
-    if (!claim.item) return;
-
-    setBusyReturnId(claim.id);
-    try {
-      const nowIso = new Date().toISOString();
-
-      const {
-        data: { user: admin },
-      } = await supabase.auth.getUser();
-
-      // 1) Update item as claimed/returned
-      const itemUpdate: any = {
-        status: "Claimed",
-        claimed_at: nowIso,
-      };
-      if (claim.user?.id) itemUpdate.claimed_by = claim.user.id;
-
-      const { error: itemErr } = await supabase
-        .from("items")
-        .update(itemUpdate)
-        .eq("id", claim.item.id);
-
-      if (itemErr) throw itemErr;
-
-      // 2) Ensure claim is approved
-      if (claim.status !== "approved") {
-        await supabase
-          .from("claims")
-          .update({ status: "approved" })
-          .eq("id", claim.id);
-      }
-
-      // 3) Log action
-      if (admin?.id) {
-        await supabase.from("logs").insert([
-          {
-            action: "item_returned",
-            item_id: claim.item.id,
-            performed_by: admin.id,
-            timestamp: nowIso,
-          },
-        ]);
-      }
-
-      await fetchClaims();
-    } catch (err) {
-      console.error("Mark returned error:", err);
-      alert("Failed to mark item as returned.");
-    } finally {
-      setBusyReturnId(null);
-    }
-  }
-
-  /* ========================= FILTERS & STATS ========================= */
-
-  const filteredClaims = useMemo(() => {
-    const term = search.trim().toLowerCase();
-
-    return claims.filter((c) => {
-      const statusValue = (c.status || "pending").toLowerCase();
-
-      const statusOk =
-        statusFilter === "all" || statusValue === statusFilter;
-
-      const haystack = [
-        c.item?.name,
-        c.campus,
-        c.category,
-        c.user?.email,
-        c.user?.full_name,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-
-      const searchOk = !term || haystack.includes(term);
-
-      return statusOk && searchOk;
-    });
-  }, [claims, search, statusFilter]);
-
-  const stats = useMemo(() => {
-    const total = claims.length;
-    const pending = claims.filter(
-      (c) => (c.status || "pending") === "pending"
-    ).length;
-    const approved = claims.filter((c) => c.status === "approved").length;
-    const rejected = claims.filter((c) => c.status === "rejected").length;
-
-    return { total, pending, approved, rejected };
-  }, [claims]);
-
-  /* ========================= LOADING / ERROR ========================= */
-
-  if (loading)
-    return (
-      <div className="text-center py-10 text-gray-400">Loading claims…</div>
-    );
-
-  if (errorMsg)
-    return (
-      <div className="text-center py-10 text-red-400">
-        Failed to load claims: {errorMsg}
-      </div>
-    );
-
-  /* ========================= LIST VIEW ========================= */
-
+  // UI — LIST VIEW
   if (!selectedClaim) {
     return (
-      <div className="p-6 max-w-7xl mx-auto">
+      <div className="max-w-6xl mx-auto p-6">
         <h1 className="text-3xl font-bold text-ubGold mb-6">
-          Claims Management
+          Admin — All Claims
         </h1>
 
-        {/* Filters + Counters */}
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
-          <div className="flex gap-2 flex-wrap items-center">
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by item, campus, user, category…"
-              className="w-72 px-3 py-2 rounded-md bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 outline-none focus:ring-2 focus:ring-ubGold text-sm"
-            />
-            <select
-              value={statusFilter}
-              onChange={(e) =>
-                setStatusFilter(
-                  e.target.value as "all" | "pending" | "approved" | "rejected"
-                )
-              }
-              className="px-3 py-2 rounded-md bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 text-sm outline-none focus:ring-2 focus:ring-ubGold"
-            >
-              <option value="all">All statuses</option>
-              <option value="pending">Pending</option>
-              <option value="approved">Approved</option>
-              <option value="rejected">Rejected</option>
-            </select>
+        {loading ? (
+          <p className="text-center text-gray-400">Loading…</p>
+        ) : (
+          <div className="grid md:grid-cols-2 gap-6">
+            {claims.map((c) => (
+              <div
+                key={c.id}
+                className="bg-gray-900 p-4 rounded-xl border border-gray-800 hover:border-ubGold cursor-pointer transition"
+                onClick={() => setSelectedClaim(c)}
+              >
+                <img
+                  src={
+                    c.item?.image ||
+                    "https://placehold.co/300x200?text=No+Image"
+                  }
+                  className="w-full h-40 object-cover rounded-lg"
+                />
+
+                <h2 className="text-lg font-semibold text-white mt-2">
+                  {c.item?.name}
+                </h2>
+                <p className="text-gray-400 text-sm">{c.profiles?.email}</p>
+                <span
+                  className={`inline-block mt-2 px-3 py-1 text-xs rounded-full ${
+                    c.status === "approved"
+                      ? "bg-green-600"
+                      : c.status === "rejected"
+                      ? "bg-red-600"
+                      : "bg-yellow-500"
+                  } text-white`}
+                >
+                  {c.status}
+                </span>
+              </div>
+            ))}
           </div>
-
-          {/* Realtime counters */}
-          <div className="flex flex-wrap gap-2 text-xs md:text-sm">
-            <span className="px-3 py-1 rounded-full bg-gray-200 dark:bg-gray-800 text-gray-800 dark:text-gray-100">
-              Total: <b>{stats.total}</b>
-            </span>
-            <span className="px-3 py-1 rounded-full bg-yellow-100 text-yellow-900 dark:bg-yellow-900 dark:text-yellow-200">
-              Pending: <b>{stats.pending}</b>
-            </span>
-            <span className="px-3 py-1 rounded-full bg-green-100 text-green-900 dark:bg-green-900 dark:text-green-200">
-              Approved: <b>{stats.approved}</b>
-            </span>
-            <span className="px-3 py-1 rounded-full bg-red-100 text-red-900 dark:bg-red-900 dark:text-red-200">
-              Rejected: <b>{stats.rejected}</b>
-            </span>
-          </div>
-        </div>
-
-        {/* Table */}
-        <div className="bg-gray-900 rounded-xl shadow border border-gray-700 overflow-hidden">
-          <table className="min-w-full text-sm">
-            <thead className="bg-gray-700 text-gray-200">
-              <tr>
-                <th className="px-4 py-3 text-left">Item</th>
-                <th className="px-4 py-3 text-left">Campus</th>
-                <th className="px-4 py-3 text-left">User</th>
-                <th className="px-4 py-3 text-left">Category</th>
-                <th className="px-4 py-3 text-left">Status</th>
-                <th className="px-4 py-3 text-center">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredClaims.length === 0 && (
-                <tr>
-                  <td
-                    colSpan={6}
-                    className="py-6 text-center text-gray-500"
-                  >
-                    No claims match your filters.
-                  </td>
-                </tr>
-              )}
-
-              {filteredClaims.map((c) => {
-                const effectiveStatus = c.status || "pending";
-                const canMarkReturned =
-                  effectiveStatus === "approved" &&
-                  c.item?.status !== "Claimed";
-
-                return (
-                  <tr
-                    key={c.id}
-                    className="border-b border-gray-800 hover:bg-gray-800/80 transition"
-                  >
-                    <td className="px-4 py-3 font-semibold text-ubGold">
-                      {c.item?.name || "—"}
-                    </td>
-                    <td className="px-4 py-3">
-                      {c.campus || "—"}
-                    </td>
-                    <td className="px-4 py-3">
-                      {c.user?.email || c.user?.full_name || "—"}
-                    </td>
-                    <td className="px-4 py-3">
-                      {c.category || "—"}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                          effectiveStatus === "approved"
-                            ? "bg-green-600 text-white"
-                            : effectiveStatus === "rejected"
-                            ? "bg-red-600 text-white"
-                            : "bg-yellow-500 text-black"
-                        }`}
-                      >
-                        {effectiveStatus}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap gap-2 justify-center">
-                        <button
-                          onClick={() => setSelectedClaim(c)}
-                          className="px-3 py-1 bg-blue-600 text-white rounded text-xs"
-                        >
-                          Chat
-                        </button>
-
-                        <button
-                          onClick={() =>
-                            updateClaimStatus(c.id, "approved")
-                          }
-                          disabled={busyStatusId === c.id}
-                          className="px-3 py-1 bg-green-600 text-white rounded text-xs disabled:opacity-50"
-                        >
-                          {busyStatusId === c.id ? "…" : "Approve"}
-                        </button>
-
-                        <button
-                          onClick={() =>
-                            updateClaimStatus(c.id, "rejected")
-                          }
-                          disabled={busyStatusId === c.id}
-                          className="px-3 py-1 bg-red-600 text-white rounded text-xs disabled:opacity-50"
-                        >
-                          {busyStatusId === c.id ? "…" : "Reject"}
-                        </button>
-
-                        {canMarkReturned && (
-                          <button
-                            onClick={() => markItemReturned(c)}
-                            disabled={busyReturnId === c.id}
-                            className="px-3 py-1 bg-ubGold text-black rounded text-xs disabled:opacity-50"
-                          >
-                            {busyReturnId === c.id
-                              ? "Marking…"
-                              : "Mark Returned"}
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        )}
       </div>
     );
   }
 
-  /* ========================= CHAT VIEW ========================= */
-
+  // UI — CHAT VIEW
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className="max-w-4xl mx-auto p-6">
       <button
         onClick={() => setSelectedClaim(null)}
-        className="mb-4 px-4 py-2 bg-gray-800 text-white rounded"
+        className="mb-4 px-4 py-2 bg-gray-800 text-white rounded-lg"
       >
         ← Back
       </button>
 
-      <div className="bg-gray-900 p-4 rounded-xl border border-gray-700 shadow">
-        <div className="flex justify-between items-start gap-4 mb-3">
-          <div>
-            <h2 className="text-xl font-bold text-white mb-1">
-              {selectedClaim.item?.name}
-            </h2>
-            <p className="text-gray-300 text-sm mb-1">
-              {selectedClaim.item?.description}
-            </p>
-            <p className="text-gray-400 text-xs">
-              📍 {selectedClaim.item?.location || "Unknown"} • 🏫{" "}
-              {selectedClaim.campus || "Unknown campus"}
-            </p>
-            {selectedClaim.message && (
-              <p className="text-sm text-gray-300 mt-2 italic">
-                “{selectedClaim.message}”
-              </p>
-            )}
-          </div>
+      <div className="rounded-xl bg-gray-900 p-5 border border-gray-800 shadow-lg">
+        <h2 className="text-xl font-bold text-white mb-2">
+          {selectedClaim.item?.name}
+        </h2>
 
-          <div className="flex flex-col gap-2 items-end">
-            <span
-              className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                (selectedClaim.status || "pending") === "approved"
-                  ? "bg-green-600 text-white"
-                  : (selectedClaim.status || "pending") === "rejected"
-                  ? "bg-red-600 text-white"
-                  : "bg-yellow-500 text-black"
-              }`}
-            >
-              {selectedClaim.status || "pending"}
-            </span>
-
-            {/* Mark returned also visible inside chat */}
-            {(selectedClaim.status || "pending") === "approved" &&
-              selectedClaim.item?.status !== "Claimed" && (
-                <button
-                  onClick={() => markItemReturned(selectedClaim)}
-                  disabled={busyReturnId === selectedClaim.id}
-                  className="px-3 py-1 bg-ubGold text-black rounded text-xs disabled:opacity-50"
-                >
-                  {busyReturnId === selectedClaim.id
-                    ? "Marking…"
-                    : "Mark Item Returned"}
-                </button>
-              )}
-          </div>
-        </div>
-
-        <div className="h-[50vh] overflow-y-auto space-y-3 mb-4 p-2 border-t border-b border-gray-700">
+        {/* CHAT */}
+        <div className="h-[60vh] overflow-y-auto space-y-4 p-2 border-y border-gray-700">
           {messages.map((msg) => {
-            const isAdmin =
-              msg.profiles?.email &&
-              !msg.profiles.email.endsWith("@ub.edu.bz");
-
+            const bubbleOwn = msg.is_admin;
             return (
               <div
                 key={msg.id}
-                className={`flex ${isAdmin ? "justify-end" : "justify-start"}`}
+                className={`flex ${bubbleOwn ? "justify-end" : "justify-start"}`}
               >
                 <div
-                  className={`p-3 rounded-xl max-w-[70%] ${
-                    isAdmin
-                      ? "bg-ubGold text-black"
-                      : "bg-gray-800 text-white"
+                  className={`p-3 max-w-[70%] rounded-xl ${
+                    bubbleOwn
+                      ? "bg-ubGold text-black rounded-br-none"
+                      : "bg-gray-800 text-white rounded-bl-none"
                   }`}
                 >
-                  <div className="flex justify-between mb-1">
-                    <span className="text-xs opacity-70">
-                      {isAdmin ? "Admin" : msg.profiles?.email || "User"}
-                    </span>
-                    <span className="text-[10px] opacity-70">
-                      {new Date(msg.created_at).toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </span>
+                  {/* BADGE */}
+                  <span
+                    className={`text-[10px] px-2 py-1 rounded-full ${
+                      bubbleOwn
+                        ? "bg-black/20 text-black"
+                        : "bg-white/20 text-white"
+                    }`}
+                  >
+                    {bubbleOwn ? "Admin" : msg.profiles?.email || "User"}
+                  </span>
+
+                  {/* TEXT */}
+                  {msg.content && (
+                    <p className="mt-1 text-sm">{msg.content}</p>
+                  )}
+
+                  {/* IMAGE */}
+                  {msg.file_url && (
+                    <img
+                      src={msg.file_url}
+                      className="mt-2 rounded-lg shadow border border-gray-700"
+                    />
+                  )}
+
+                  {/* TIME + READ STATUS */}
+                  <div className="text-[10px] opacity-60 mt-1">
+                    {new Date(msg.created_at).toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+
+                    {bubbleOwn && (
+                      <span className="ml-2 text-blue-300">
+                        {msg.seen ? "✓ Seen" : "✓ Sent"}
+                      </span>
+                    )}
                   </div>
-                  <p className="text-sm">{msg.content}</p>
                 </div>
               </div>
             );
@@ -647,21 +333,24 @@ export default function AdminClaimsPage() {
           <div ref={messagesEndRef} />
         </div>
 
+        {/* INPUT */}
         <form
           onSubmit={sendMessage}
-          className="flex gap-2 border-t border-gray-700 pt-3"
+          className="flex items-center gap-3 pt-3"
         >
+          <label className="cursor-pointer bg-gray-800 px-3 py-2 rounded-lg border border-gray-700">
+            📎
+            <input type="file" className="hidden" onChange={sendImage} />
+          </label>
+
           <input
-            type="text"
             value={newMessage}
             onChange={(e) => setNewMessage(e.target.value)}
-            placeholder="Type your message…"
-            className="flex-1 px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-white outline-none focus:ring-2 focus:ring-ubGold"
+            placeholder="Type a message…"
+            className="flex-1 px-3 py-2 bg-gray-800 text-white rounded-lg border border-gray-700"
           />
-          <button
-            type="submit"
-            className="px-4 py-2 bg-ubGold text-black rounded-lg font-semibold hover:bg-yellow-400"
-          >
+
+          <button className="px-4 py-2 bg-ubGold text-black rounded-lg">
             Send
           </button>
         </form>
