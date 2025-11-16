@@ -3,11 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
-/* -------------------------------------------------------------------------- */
-/*                                    TYPES                                   */
-/* -------------------------------------------------------------------------- */
+/* ---------------------------------- TYPES ---------------------------------- */
 
-type ItemRow = {
+type ItemData = {
   id: string;
   name: string;
   description: string | null;
@@ -18,7 +16,7 @@ type ItemRow = {
   category_id: string | null;
 };
 
-type ProfileRow = {
+type ProfileData = {
   id: string;
   full_name: string | null;
   email: string | null;
@@ -31,17 +29,6 @@ type ClaimRow = {
   message: string | null;
   status: string | null;
   created_at: string;
-  updated_at: string | null;
-};
-
-type CampusRow = {
-  id: string;
-  name: string;
-};
-
-type CategoryRow = {
-  id: string;
-  name: string;
 };
 
 type ClaimView = {
@@ -49,9 +36,8 @@ type ClaimView = {
   message: string | null;
   status: string | null;
   created_at: string | null;
-
-  item: ItemRow | null;
-  user: ProfileRow | null;
+  item: ItemData | null;
+  user: ProfileData | null;
   campus: string | null;
   category: string | null;
 };
@@ -60,18 +46,13 @@ type Message = {
   id: string;
   claim_id: string;
   sender_id: string;
-  content: string | null;
-  file_url: string | null;
+  content: string;
   created_at: string;
-  is_admin: boolean;
-  profiles?: {
-    full_name: string | null;
-    email: string | null;
-  } | null;
+  profiles?: { full_name: string | null; email: string | null };
 };
 
 /* -------------------------------------------------------------------------- */
-/*                              MAIN COMPONENT                                */
+/*                                MAIN COMPONENT                              */
 /* -------------------------------------------------------------------------- */
 
 export default function AdminClaimsPage() {
@@ -91,127 +72,81 @@ export default function AdminClaimsPage() {
   const [busyStatusId, setBusyStatusId] = useState<string | null>(null);
   const [busyReturnId, setBusyReturnId] = useState<string | null>(null);
 
-  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  /* ------------------------------------------------------------------------ */
-  /*                             FETCH ALL CLAIMS                             */
-  /* ------------------------------------------------------------------------ */
+  /* ========================= FETCH ALL CLAIMS ========================= */
 
   const fetchClaims = async () => {
     setErrorMsg(null);
 
     try {
+      // 1️⃣ Load raw claims
       const { data: claimRows, error: claimErr } = await supabase
         .from("claims")
-        .select<"*", ClaimRow>("*")
+        .select("*")
         .order("created_at", { ascending: false });
 
       if (claimErr) throw claimErr;
-      if (!claimRows || claimRows.length === 0) {
-        setClaims([]);
-        return;
-      }
 
-      const itemIds = Array.from(
-        new Set(claimRows.map((c) => c.item_id).filter(Boolean))
-      );
-      const userIds = Array.from(
-        new Set(claimRows.map((c) => c.claimed_by).filter(Boolean))
-      );
+      const final: ClaimView[] = [];
 
-      // Items
-      let itemsMap = new Map<string, ItemRow>();
-      if (itemIds.length > 0) {
-        const { data: items, error: itemErr } = await supabase
+      // 2️⃣ For each claim, join items + user + campus + category manually
+      for (const row of claimRows as ClaimRow[]) {
+        const { data: item } = await supabase
           .from("items")
-          .select<"*", ItemRow>("*")
-          .in("id", itemIds);
+          .select("*")
+          .eq("id", row.item_id)
+          .single();
 
-        if (itemErr) throw itemErr;
-        items?.forEach((it) => itemsMap.set(it.id, it));
-      }
-
-      // Profiles
-      let profilesMap = new Map<string, ProfileRow>();
-      if (userIds.length > 0) {
-        const { data: profiles, error: profErr } = await supabase
+        const { data: user } = await supabase
           .from("profiles")
-          .select<"id, full_name, email", ProfileRow>("id, full_name, email")
-          .in("id", userIds);
+          .select("id, full_name, email")
+          .eq("id", row.claimed_by)
+          .single();
 
-        if (profErr) throw profErr;
-        profiles?.forEach((p) => profilesMap.set(p.id, p));
-      }
+        const { data: campus } =
+          item?.campus_id
+            ? await supabase
+                .from("campuses")
+                .select("name")
+                .eq("id", item.campus_id)
+                .single()
+            : { data: null };
 
-      // Campus & categories
-      const campusIds = Array.from(
-        new Set(
-          Array.from(itemsMap.values())
-            .map((it) => it.campus_id)
-            .filter((id): id is string => !!id)
-        )
-      );
-      const categoryIds = Array.from(
-        new Set(
-          Array.from(itemsMap.values())
-            .map((it) => it.category_id)
-            .filter((id): id is string => !!id)
-        )
-      );
+        const { data: category } =
+          item?.category_id
+            ? await supabase
+                .from("categories")
+                .select("name")
+                .eq("id", item.category_id)
+                .single()
+            : { data: null };
 
-      let campusMap = new Map<string, string>();
-      let categoryMap = new Map<string, string>();
-
-      if (campusIds.length > 0) {
-        const { data: campuses, error: campusErr } = await supabase
-          .from("campuses")
-          .select<"id, name", CampusRow>("id, name")
-          .in("id", campusIds);
-
-        if (campusErr) throw campusErr;
-        campuses?.forEach((c) => campusMap.set(c.id, c.name));
-      }
-
-      if (categoryIds.length > 0) {
-        const { data: categories, error: catErr } = await supabase
-          .from("categories")
-          .select<"id, name", CategoryRow>("id, name")
-          .in("id", categoryIds);
-
-        if (catErr) throw catErr;
-        categories?.forEach((c) => categoryMap.set(c.id, c.name));
-      }
-
-      // Build final view
-      const final: ClaimView[] = claimRows.map((row) => {
-        const item = itemsMap.get(row.item_id) || null;
-
-        let fixedItem: ItemRow | null = item;
-        if (item && item.image) {
-          const { data: urlData } = supabase.storage
+        // 3️⃣ Fix image URL
+        let imageUrl: string | null = null;
+        if (item?.image) {
+          const { data: url } = supabase.storage
             .from("item-photos")
             .getPublicUrl(item.image);
-          const publicUrl = urlData?.publicUrl || null;
-          fixedItem = { ...item, image: publicUrl };
+          imageUrl = url?.publicUrl || null;
         }
 
-        const user = profilesMap.get(row.claimed_by) || null;
-        const campusName =
-          item?.campus_id ? campusMap.get(item.campus_id) || null : null;
-        const categoryName =
-          item?.category_id ? categoryMap.get(item.category_id) || null : null;
-
-        return {
+        final.push({
           id: row.id,
           message: row.message,
           status: row.status,
           created_at: row.created_at,
-          item: fixedItem,
+          item: item
+            ? {
+                ...item,
+                image: imageUrl,
+              }
+            : null,
           user,
-          campus: campusName,
-          category: categoryName,
-        };
-      });
+          campus: campus?.name || null,
+          category: category?.name || null,
+        });
+      }
 
       setClaims(final);
     } catch (err: any) {
@@ -225,20 +160,22 @@ export default function AdminClaimsPage() {
   useEffect(() => {
     setLoading(true);
     fetchClaims();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ------------------------------------------------------------------------ */
-  /*                     REALTIME DASHBOARD (CLAIMS TABLE)                    */
-  /* ------------------------------------------------------------------------ */
+  /* ========================= REALTIME DASHBOARD ========================= */
 
   useEffect(() => {
     const channel = supabase
       .channel("admin-claims-dashboard")
       .on(
         "postgres_changes",
-        { schema: "public", table: "claims", event: "*" },
+        {
+          schema: "public",
+          table: "claims",
+          event: "*",
+        },
         () => {
+          // whenever a claim is inserted/updated/deleted, refresh dashboard
           fetchClaims();
         }
       )
@@ -250,9 +187,7 @@ export default function AdminClaimsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ------------------------------------------------------------------------ */
-  /*                         CHAT: LOAD MESSAGES (ADMIN)                      */
-  /* ------------------------------------------------------------------------ */
+  /* ========================= CHAT: LOAD MESSAGES ========================= */
 
   useEffect(() => {
     if (!selectedClaim) return;
@@ -260,47 +195,13 @@ export default function AdminClaimsPage() {
     const claimId = selectedClaim.id;
 
     async function loadMessages() {
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from("messages")
-        .select(
-          "id, claim_id, sender_id, content, file_url, created_at, is_admin, profiles:sender_id(full_name, email)"
-        )
+        .select("*, profiles:sender_id(full_name,email)")
         .eq("claim_id", claimId)
         .order("created_at", { ascending: true });
 
-      if (error) {
-        console.error("Load messages error:", error);
-        return;
-      }
-
-      const normalized: Message[] = (data || []).map((d: any) => {
-        const profilesField = d.profiles;
-        let profileObj:
-          | {
-              full_name: string | null;
-              email: string | null;
-            }
-          | null = null;
-
-        if (Array.isArray(profilesField)) {
-          profileObj = profilesField[0] || null;
-        } else if (profilesField && typeof profilesField === "object") {
-          profileObj = profilesField;
-        }
-
-        return {
-          id: d.id,
-          claim_id: d.claim_id,
-          sender_id: d.sender_id,
-          content: d.content,
-          file_url: d.file_url ?? null,
-          created_at: d.created_at,
-          is_admin: !!d.is_admin,
-          profiles: profileObj,
-        };
-      });
-
-      setMessages(normalized);
+      setMessages(data || []);
     }
 
     loadMessages();
@@ -315,8 +216,8 @@ export default function AdminClaimsPage() {
           schema: "public",
           filter: `claim_id=eq.${claimId}`,
         },
-        () => {
-          loadMessages(); // reload to keep profiles + shape correct
+        (payload) => {
+          setMessages((prev) => [...prev, payload.new as Message]);
         }
       )
       .subscribe();
@@ -330,34 +231,7 @@ export default function AdminClaimsPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  /* ------------------------------------------------------------------------ */
-  /*                           IMAGE UPLOAD HANDLER                           */
-  /* ------------------------------------------------------------------------ */
-
-  async function uploadImage(file: File, claimId: string) {
-    const fileExt = file.name.split(".").pop();
-    const fileName = `${claimId}/${Date.now()}.${fileExt}`;
-
-    const { error: uploadError } = await supabase.storage
-      .from("chat-attachments")
-      .upload(fileName, file);
-
-    if (uploadError) {
-      console.error(uploadError);
-      alert("Failed to upload file");
-      return null;
-    }
-
-    const { data: publicData } = supabase.storage
-      .from("chat-attachments")
-      .getPublicUrl(fileName);
-
-    return publicData?.publicUrl || null;
-  }
-
-  /* ------------------------------------------------------------------------ */
-  /*                          SEND MESSAGE (TEXT)                             */
-  /* ------------------------------------------------------------------------ */
+  /* ========================= SEND MESSAGE (ADMIN) ========================= */
 
   async function sendMessage(e: React.FormEvent) {
     e.preventDefault();
@@ -365,17 +239,14 @@ export default function AdminClaimsPage() {
 
     const {
       data: { user },
-      error,
     } = await supabase.auth.getUser();
-
-    if (error || !user) return;
+    if (!user) return;
 
     await supabase.from("messages").insert([
       {
         claim_id: selectedClaim.id,
         sender_id: user.id,
         content: newMessage.trim(),
-        file_url: null,
         is_admin: true,
       },
     ]);
@@ -383,40 +254,7 @@ export default function AdminClaimsPage() {
     setNewMessage("");
   }
 
-  /* ------------------------------------------------------------------------ */
-  /*                          SEND IMAGE ATTACHMENT                           */
-  /* ------------------------------------------------------------------------ */
-
-  async function sendImage(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = ""; // reset input so same file can be picked again
-
-    if (!file || !selectedClaim) return;
-
-    const {
-      data: { user },
-      error,
-    } = await supabase.auth.getUser();
-
-    if (error || !user) return;
-
-    const fileUrl = await uploadImage(file, selectedClaim.id);
-    if (!fileUrl) return;
-
-    await supabase.from("messages").insert([
-      {
-        claim_id: selectedClaim.id,
-        sender_id: user.id,
-        content: null,
-        file_url: fileUrl,
-        is_admin: true,
-      },
-    ]);
-  }
-
-  /* ------------------------------------------------------------------------ */
-  /*                     APPROVE / REJECT CLAIM STATUS                        */
-  /* ------------------------------------------------------------------------ */
+  /* ========================= APPROVE / REJECT ========================= */
 
   async function updateClaimStatus(
     id: string,
@@ -433,15 +271,13 @@ export default function AdminClaimsPage() {
 
       await fetchClaims();
     } catch (err) {
-      console.error("Update claim status error:", err);
+      console.error(err);
     } finally {
       setBusyStatusId(null);
     }
   }
 
-  /* ------------------------------------------------------------------------ */
-  /*                       MARK ITEM AS RETURNED / CLAIMED                    */
-  /* ------------------------------------------------------------------------ */
+  /* ========================= MARK ITEM RETURNED ========================= */
 
   async function markItemReturned(claim: ClaimView) {
     if (!claim.item) return;
@@ -449,24 +285,17 @@ export default function AdminClaimsPage() {
     setBusyReturnId(claim.id);
     try {
       const nowIso = new Date().toISOString();
-      const { data: authData } = await supabase.auth.getUser();
-      const admin = authData?.user;
 
-      const itemUpdate: Partial<ItemRow> & {
-        status?: string | null;
-        claimed_at?: string;
-        claimed_by?: string | null;
-      } = {
+      const {
+        data: { user: admin },
+      } = await supabase.auth.getUser();
+
+      // 1) Update item as claimed/returned
+      const itemUpdate: any = {
         status: "Claimed",
+        claimed_at: nowIso,
       };
-
-      // @ts-ignore if you have claimed_at column
-      itemUpdate.claimed_at = nowIso;
-
-      if (claim.user?.id) {
-        // @ts-ignore if you have claimed_by column
-        itemUpdate.claimed_by = claim.user.id;
-      }
+      if (claim.user?.id) itemUpdate.claimed_by = claim.user.id;
 
       const { error: itemErr } = await supabase
         .from("items")
@@ -475,6 +304,7 @@ export default function AdminClaimsPage() {
 
       if (itemErr) throw itemErr;
 
+      // 2) Ensure claim is approved
       if (claim.status !== "approved") {
         await supabase
           .from("claims")
@@ -482,6 +312,7 @@ export default function AdminClaimsPage() {
           .eq("id", claim.id);
       }
 
+      // 3) Log action
       if (admin?.id) {
         await supabase.from("logs").insert([
           {
@@ -495,25 +326,23 @@ export default function AdminClaimsPage() {
 
       await fetchClaims();
     } catch (err) {
-      console.error("Mark item returned error:", err);
+      console.error("Mark returned error:", err);
       alert("Failed to mark item as returned.");
     } finally {
       setBusyReturnId(null);
     }
   }
 
-  /* ------------------------------------------------------------------------ */
-  /*                             FILTERS & STATS                              */
-  /* ------------------------------------------------------------------------ */
+  /* ========================= FILTERS & STATS ========================= */
 
   const filteredClaims = useMemo(() => {
     const term = search.trim().toLowerCase();
 
     return claims.filter((c) => {
-      const effectiveStatus = (c.status || "pending").toLowerCase();
+      const statusValue = (c.status || "pending").toLowerCase();
 
       const statusOk =
-        statusFilter === "all" || effectiveStatus === statusFilter;
+        statusFilter === "all" || statusValue === statusFilter;
 
       const haystack = [
         c.item?.name,
@@ -543,29 +372,21 @@ export default function AdminClaimsPage() {
     return { total, pending, approved, rejected };
   }, [claims]);
 
-  /* ------------------------------------------------------------------------ */
-  /*                            LOADING / ERROR UI                            */
-  /* ------------------------------------------------------------------------ */
+  /* ========================= LOADING / ERROR ========================= */
 
-  if (loading) {
+  if (loading)
     return (
-      <div className="text-center py-10 text-gray-400">
-        Loading claims…
-      </div>
+      <div className="text-center py-10 text-gray-400">Loading claims…</div>
     );
-  }
 
-  if (errorMsg) {
+  if (errorMsg)
     return (
       <div className="text-center py-10 text-red-400">
         Failed to load claims: {errorMsg}
       </div>
     );
-  }
 
-  /* ------------------------------------------------------------------------ */
-  /*                               LIST VIEW UI                               */
-  /* ------------------------------------------------------------------------ */
+  /* ========================= LIST VIEW ========================= */
 
   if (!selectedClaim) {
     return (
@@ -587,11 +408,7 @@ export default function AdminClaimsPage() {
               value={statusFilter}
               onChange={(e) =>
                 setStatusFilter(
-                  e.target.value as
-                    | "all"
-                    | "pending"
-                    | "approved"
-                    | "rejected"
+                  e.target.value as "all" | "pending" | "approved" | "rejected"
                 )
               }
               className="px-3 py-2 rounded-md bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 text-sm outline-none focus:ring-2 focus:ring-ubGold"
@@ -659,11 +476,15 @@ export default function AdminClaimsPage() {
                     <td className="px-4 py-3 font-semibold text-ubGold">
                       {c.item?.name || "—"}
                     </td>
-                    <td className="px-4 py-3">{c.campus || "—"}</td>
+                    <td className="px-4 py-3">
+                      {c.campus || "—"}
+                    </td>
                     <td className="px-4 py-3">
                       {c.user?.email || c.user?.full_name || "—"}
                     </td>
-                    <td className="px-4 py-3">{c.category || "—"}</td>
+                    <td className="px-4 py-3">
+                      {c.category || "—"}
+                    </td>
                     <td className="px-4 py-3">
                       <span
                         className={`px-3 py-1 rounded-full text-xs font-semibold ${
@@ -729,24 +550,21 @@ export default function AdminClaimsPage() {
     );
   }
 
-  /* ------------------------------------------------------------------------ */
-  /*                                CHAT VIEW UI                              */
-  /* ------------------------------------------------------------------------ */
+  /* ========================= CHAT VIEW ========================= */
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+    <div className="p-6 max-w-4xl mx-auto">
       <button
         onClick={() => setSelectedClaim(null)}
-        className="mb-4 px-4 py-2 bg-gray-800 text-white rounded hover:bg-gray-700 transition"
+        className="mb-4 px-4 py-2 bg-gray-800 text-white rounded"
       >
         ← Back
       </button>
 
-      <div className="bg-gray-900 rounded-xl border border-gray-800 shadow-xl overflow-hidden">
-        {/* Header */}
-        <div className="p-5 border-b border-gray-800 bg-gray-850 flex justify-between gap-4">
+      <div className="bg-gray-900 p-4 rounded-xl border border-gray-700 shadow">
+        <div className="flex justify-between items-start gap-4 mb-3">
           <div>
-            <h2 className="text-2xl font-bold text-white mb-1">
+            <h2 className="text-xl font-bold text-white mb-1">
               {selectedClaim.item?.name}
             </h2>
             <p className="text-gray-300 text-sm mb-1">
@@ -763,7 +581,7 @@ export default function AdminClaimsPage() {
             )}
           </div>
 
-          <div className="flex flex-col items-end gap-2">
+          <div className="flex flex-col gap-2 items-end">
             <span
               className={`px-3 py-1 rounded-full text-xs font-semibold ${
                 (selectedClaim.status || "pending") === "approved"
@@ -776,6 +594,7 @@ export default function AdminClaimsPage() {
               {selectedClaim.status || "pending"}
             </span>
 
+            {/* Mark returned also visible inside chat */}
             {(selectedClaim.status || "pending") === "approved" &&
               selectedClaim.item?.status !== "Claimed" && (
                 <button
@@ -791,10 +610,11 @@ export default function AdminClaimsPage() {
           </div>
         </div>
 
-        {/* Messages */}
-        <div className="h-[60vh] overflow-y-auto p-5 space-y-4 bg-gray-950">
+        <div className="h-[50vh] overflow-y-auto space-y-3 mb-4 p-2 border-t border-b border-gray-700">
           {messages.map((msg) => {
-            const isAdmin = !!msg.is_admin;
+            const isAdmin =
+              msg.profiles?.email &&
+              !msg.profiles.email.endsWith("@ub.edu.bz");
 
             return (
               <div
@@ -802,37 +622,24 @@ export default function AdminClaimsPage() {
                 className={`flex ${isAdmin ? "justify-end" : "justify-start"}`}
               >
                 <div
-                  className={`max-w-[70%] px-4 py-3 rounded-2xl shadow-md ${
+                  className={`p-3 rounded-xl max-w-[70%] ${
                     isAdmin
-                      ? "bg-ubGold text-black rounded-br-none"
-                      : "bg-gray-800 text-white rounded-bl-none"
+                      ? "bg-ubGold text-black"
+                      : "bg-gray-800 text-white"
                   }`}
                 >
-                  <div className="flex justify-between mb-2">
-                    <span className="text-[11px] opacity-70">
+                  <div className="flex justify-between mb-1">
+                    <span className="text-xs opacity-70">
                       {isAdmin ? "Admin" : msg.profiles?.email || "User"}
                     </span>
-                    <span className="text-[10px] opacity-60">
+                    <span className="text-[10px] opacity-70">
                       {new Date(msg.created_at).toLocaleTimeString([], {
                         hour: "2-digit",
                         minute: "2-digit",
                       })}
                     </span>
                   </div>
-
-                  {msg.content && (
-                    <p className="text-sm leading-relaxed mb-2">
-                      {msg.content}
-                    </p>
-                  )}
-
-                  {msg.file_url && (
-                    <img
-                      src={msg.file_url}
-                      alt="attachment"
-                      className="max-w-full rounded-lg border border-gray-700 mt-1 shadow"
-                    />
-                  )}
+                  <p className="text-sm">{msg.content}</p>
                 </div>
               </div>
             );
@@ -840,33 +647,24 @@ export default function AdminClaimsPage() {
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Input bar */}
-        <div className="border-t border-gray-800 bg-gray-850 p-4 flex items-center gap-3">
-          <label className="cursor-pointer bg-gray-800 border border-gray-700 p-2 rounded-lg hover:bg-gray-700 transition">
-            📎
-            <input
-              type="file"
-              className="hidden"
-              accept="image/*"
-              onChange={sendImage}
-            />
-          </label>
-
+        <form
+          onSubmit={sendMessage}
+          className="flex gap-2 border-t border-gray-700 pt-3"
+        >
           <input
             type="text"
             value={newMessage}
             onChange={(e) => setNewMessage(e.target.value)}
-            placeholder="Write a message…"
-            className="flex-1 px-4 py-2 bg-gray-800 text-white rounded-lg border border-gray-700 focus:ring-2 focus:ring-ubGold outline-none"
+            placeholder="Type your message…"
+            className="flex-1 px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-white outline-none focus:ring-2 focus:ring-ubGold"
           />
-
           <button
-            onClick={sendMessage}
-            className="px-5 py-2 bg-ubGold text-black rounded-lg hover:bg-yellow-400 font-semibold"
+            type="submit"
+            className="px-4 py-2 bg-ubGold text-black rounded-lg font-semibold hover:bg-yellow-400"
           >
             Send
           </button>
-        </div>
+        </form>
       </div>
     </div>
   );
