@@ -3,9 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
-/* ---------------------------------- TYPES ---------------------------------- */
+/* -------------------------------------------------------------------------- */
+/*                                    TYPES                                   */
+/* -------------------------------------------------------------------------- */
 
-type ItemData = {
+type ItemRow = {
   id: string;
   name: string;
   description: string | null;
@@ -16,7 +18,7 @@ type ItemData = {
   category_id: string | null;
 };
 
-type ProfileData = {
+type ProfileRow = {
   id: string;
   full_name: string | null;
   email: string | null;
@@ -29,6 +31,17 @@ type ClaimRow = {
   message: string | null;
   status: string | null;
   created_at: string;
+  updated_at: string | null;
+};
+
+type CampusRow = {
+  id: string;
+  name: string;
+};
+
+type CategoryRow = {
+  id: string;
+  name: string;
 };
 
 type ClaimView = {
@@ -36,8 +49,9 @@ type ClaimView = {
   message: string | null;
   status: string | null;
   created_at: string | null;
-  item: ItemData | null;
-  user: ProfileData | null;
+
+  item: ItemRow | null;
+  user: ProfileRow | null;
   campus: string | null;
   category: string | null;
 };
@@ -48,11 +62,15 @@ type Message = {
   sender_id: string;
   content: string;
   created_at: string;
-  profiles?: { full_name: string | null; email: string | null };
+  is_admin: boolean;
+  profiles?: {
+    full_name: string | null;
+    email: string | null;
+  };
 };
 
 /* -------------------------------------------------------------------------- */
-/*                                MAIN COMPONENT                              */
+/*                              MAIN COMPONENT                                */
 /* -------------------------------------------------------------------------- */
 
 export default function AdminClaimsPage() {
@@ -72,88 +90,146 @@ export default function AdminClaimsPage() {
   const [busyStatusId, setBusyStatusId] = useState<string | null>(null);
   const [busyReturnId, setBusyReturnId] = useState<string | null>(null);
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
-  /* ========================= FETCH ALL CLAIMS ========================= */
+  /* ------------------------------------------------------------------------ */
+  /*                             FETCH ALL CLAIMS                             */
+  /* ------------------------------------------------------------------------ */
 
   const fetchClaims = async () => {
     setErrorMsg(null);
 
     try {
-      // 1️⃣ Load raw claims (whatever RLS allows this admin user to see)
+      // 1) Load all claims the current auth user is allowed to see
       const { data: claimRows, error: claimErr } = await supabase
         .from("claims")
-        .select("*")
+        .select<"*", ClaimRow>("*")
         .order("created_at", { ascending: false });
 
       if (claimErr) throw claimErr;
+      if (!claimRows || claimRows.length === 0) {
+        setClaims([]);
+        return;
+      }
 
-      const final: ClaimView[] = [];
+      // Collect IDs to batch query
+      const itemIds = Array.from(
+        new Set(claimRows.map((c) => c.item_id).filter(Boolean))
+      );
+      const userIds = Array.from(
+        new Set(claimRows.map((c) => c.claimed_by).filter(Boolean))
+      );
 
-      // 2️⃣ For each claim, join items + user + campus + category manually
-      for (const row of (claimRows || []) as ClaimRow[]) {
-        // item
-        const { data: item } = await supabase
+      // 2) Fetch all items
+      let itemsMap = new Map<string, ItemRow>();
+      if (itemIds.length > 0) {
+        const { data: items, error: itemErr } = await supabase
           .from("items")
-          .select("*")
-          .eq("id", row.item_id)
-          .single();
+          .select<"*", ItemRow>("*")
+          .in("id", itemIds);
 
-        // claimant profile
-        const { data: user } = await supabase
+        if (itemErr) throw itemErr;
+
+        items?.forEach((it) => {
+          itemsMap.set(it.id, it);
+        });
+      }
+
+      // 3) Fetch all profiles for claimants
+      let profilesMap = new Map<string, ProfileRow>();
+      if (userIds.length > 0) {
+        const { data: profiles, error: profErr } = await supabase
           .from("profiles")
-          .select("id, full_name, email")
-          .eq("id", row.claimed_by)
-          .single();
+          .select<"id, full_name, email", ProfileRow>("id, full_name, email")
+          .in("id", userIds);
 
-        // campus
-        const { data: campus } =
-          item?.campus_id
-            ? await supabase
-                .from("campuses")
-                .select("name")
-                .eq("id", item.campus_id)
-                .single()
-            : { data: null as any };
+        if (profErr) throw profErr;
 
-        // category
-        const { data: category } =
-          item?.category_id
-            ? await supabase
-                .from("categories")
-                .select("name")
-                .eq("id", item.category_id)
-                .single()
-            : { data: null as any };
+        profiles?.forEach((p) => {
+          profilesMap.set(p.id, p);
+        });
+      }
 
-        // 3️⃣ Fix image URL from storage bucket
-        let imageUrl: string | null = null;
-        if (item?.image) {
-          const { data: url } = supabase.storage
+      // 4) Collect campus/category IDs from items
+      const campusIds = Array.from(
+        new Set(
+          Array.from(itemsMap.values())
+            .map((it) => it.campus_id)
+            .filter((id): id is string => !!id)
+        )
+      );
+
+      const categoryIds = Array.from(
+        new Set(
+          Array.from(itemsMap.values())
+            .map((it) => it.category_id)
+            .filter((id): id is string => !!id)
+        )
+      );
+
+      let campusMap = new Map<string, string>();
+      let categoryMap = new Map<string, string>();
+
+      if (campusIds.length > 0) {
+        const { data: campuses, error: campusErr } = await supabase
+          .from("campuses")
+          .select<"id, name", CampusRow>("id, name")
+          .in("id", campusIds);
+
+        if (campusErr) throw campusErr;
+        campuses?.forEach((c) => campusMap.set(c.id, c.name));
+      }
+
+      if (categoryIds.length > 0) {
+        const { data: categories, error: catErr } = await supabase
+          .from("categories")
+          .select<"id, name", CategoryRow>("id, name")
+          .in("id", categoryIds);
+
+        if (catErr) throw catErr;
+        categories?.forEach((c) => categoryMap.set(c.id, c.name));
+      }
+
+      // 5) Build final ClaimView list
+      const final: ClaimView[] = claimRows.map((row) => {
+        const item = itemsMap.get(row.item_id) || null;
+
+        // Fix image public URL if present
+        let fixedItem: ItemRow | null = item;
+        if (item && item.image) {
+          const { data: urlData } = supabase.storage
             .from("item-photos")
             .getPublicUrl(item.image);
-          imageUrl = url?.publicUrl || null;
+
+          const publicUrl = urlData?.publicUrl || null;
+
+          fixedItem = {
+            ...item,
+            image: publicUrl,
+          };
         }
 
-        final.push({
+        const user = profilesMap.get(row.claimed_by) || null;
+
+        const campusName =
+          item?.campus_id ? campusMap.get(item.campus_id) || null : null;
+
+        const categoryName =
+          item?.category_id ? categoryMap.get(item.category_id) || null : null;
+
+        return {
           id: row.id,
           message: row.message,
           status: row.status,
           created_at: row.created_at,
-          item: item
-            ? {
-                ...item,
-                image: imageUrl,
-              }
-            : null,
+          item: fixedItem,
           user,
-          campus: campus?.name || null,
-          category: category?.name || null,
-        });
-      }
+          campus: campusName,
+          category: categoryName,
+        };
+      });
 
       setClaims(final);
-      console.log("Admin claims loaded:", final.length);
     } catch (err: any) {
       console.error("Fetch claims error:", err);
       setErrorMsg(err.message || "Failed to fetch claims");
@@ -168,18 +244,16 @@ export default function AdminClaimsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ========================= REALTIME DASHBOARD ========================= */
+  /* ------------------------------------------------------------------------ */
+  /*                     REALTIME DASHBOARD (CLAIMS TABLE)                    */
+  /* ------------------------------------------------------------------------ */
 
   useEffect(() => {
     const channel = supabase
       .channel("admin-claims-dashboard")
       .on(
         "postgres_changes",
-        {
-          schema: "public",
-          table: "claims",
-          event: "*",
-        },
+        { schema: "public", table: "claims", event: "*" },
         () => {
           // whenever a claim is inserted/updated/deleted, refresh dashboard
           fetchClaims();
@@ -193,7 +267,9 @@ export default function AdminClaimsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ========================= CHAT: LOAD MESSAGES ========================= */
+  /* ------------------------------------------------------------------------ */
+  /*                         CHAT: LOAD MESSAGES (ADMIN)                      */
+  /* ------------------------------------------------------------------------ */
 
   useEffect(() => {
     if (!selectedClaim) return;
@@ -201,13 +277,44 @@ export default function AdminClaimsPage() {
     const claimId = selectedClaim.id;
 
     async function loadMessages() {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("messages")
-        .select("*, profiles:sender_id(full_name,email)")
+        .select(
+          "id, claim_id, sender_id, content, created_at, is_admin, profiles:sender_id(full_name, email)"
+        )
         .eq("claim_id", claimId)
         .order("created_at", { ascending: true });
 
-      setMessages(data || []);
+      if (error) {
+        console.error("Load messages error:", error);
+        return;
+      }
+
+      // Normalize Supabase response: profiles can be returned as an array when
+      // using a foreign-table select like `profiles:sender_id(...)`. Convert
+      // it to the single object shape expected by our Message type.
+      const normalized = (data || []).map((d: any) => {
+        const profilesField = d.profiles;
+        let profileObj: { full_name: string | null; email: string | null } | null = null;
+
+        if (Array.isArray(profilesField)) {
+          profileObj = profilesField[0] || null;
+        } else if (profilesField && typeof profilesField === "object") {
+          profileObj = profilesField;
+        }
+
+        return {
+          id: d.id,
+          claim_id: d.claim_id,
+          sender_id: d.sender_id,
+          content: d.content,
+          created_at: d.created_at,
+          is_admin: d.is_admin,
+          profiles: profileObj,
+        } as Message;
+      });
+
+      setMessages(normalized);
     }
 
     loadMessages();
@@ -237,7 +344,9 @@ export default function AdminClaimsPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  /* ========================= SEND MESSAGE (ADMIN) ========================= */
+  /* ------------------------------------------------------------------------ */
+  /*                          SEND MESSAGE (ADMIN)                            */
+  /* ------------------------------------------------------------------------ */
 
   async function sendMessage(e: React.FormEvent) {
     e.preventDefault();
@@ -245,8 +354,10 @@ export default function AdminClaimsPage() {
 
     const {
       data: { user },
+      error,
     } = await supabase.auth.getUser();
-    if (!user) return;
+
+    if (error || !user) return;
 
     await supabase.from("messages").insert([
       {
@@ -260,7 +371,9 @@ export default function AdminClaimsPage() {
     setNewMessage("");
   }
 
-  /* ========================= APPROVE / REJECT ========================= */
+  /* ------------------------------------------------------------------------ */
+  /*                     APPROVE / REJECT CLAIM STATUS                        */
+  /* ------------------------------------------------------------------------ */
 
   async function updateClaimStatus(
     id: string,
@@ -277,13 +390,15 @@ export default function AdminClaimsPage() {
 
       await fetchClaims();
     } catch (err) {
-      console.error("updateClaimStatus error:", err);
+      console.error("Update claim status error:", err);
     } finally {
       setBusyStatusId(null);
     }
   }
 
-  /* ========================= MARK ITEM RETURNED ========================= */
+  /* ------------------------------------------------------------------------ */
+  /*                       MARK ITEM AS RETURNED / CLAIMED                    */
+  /* ------------------------------------------------------------------------ */
 
   async function markItemReturned(claim: ClaimView) {
     if (!claim.item) return;
@@ -291,17 +406,26 @@ export default function AdminClaimsPage() {
     setBusyReturnId(claim.id);
     try {
       const nowIso = new Date().toISOString();
+      const { data: authData } = await supabase.auth.getUser();
+      const admin = authData?.user;
 
-      const {
-        data: { user: admin },
-      } = await supabase.auth.getUser();
-
-      // 1) Update item as claimed/returned
-      const itemUpdate: any = {
+      // 1) Update item row
+      const itemUpdate: Partial<ItemRow> & {
+        status?: string | null;
+        claimed_at?: string;
+        claimed_by?: string | null;
+      } = {
         status: "Claimed",
-        claimed_at: nowIso,
       };
-      if (claim.user?.id) itemUpdate.claimed_by = claim.user.id;
+
+      // Add claimed_at field if you have it; otherwise remove
+      // @ts-ignore - if you added claimed_at column
+      itemUpdate.claimed_at = nowIso;
+
+      if (claim.user?.id) {
+        // @ts-ignore - if you have claimed_by column
+        itemUpdate.claimed_by = claim.user.id;
+      }
 
       const { error: itemErr } = await supabase
         .from("items")
@@ -310,7 +434,7 @@ export default function AdminClaimsPage() {
 
       if (itemErr) throw itemErr;
 
-      // 2) Ensure claim is approved
+      // 2) Ensure claim status is approved
       if (claim.status !== "approved") {
         await supabase
           .from("claims")
@@ -318,7 +442,7 @@ export default function AdminClaimsPage() {
           .eq("id", claim.id);
       }
 
-      // 3) Log action
+      // 3) Insert into logs table
       if (admin?.id) {
         await supabase.from("logs").insert([
           {
@@ -332,23 +456,25 @@ export default function AdminClaimsPage() {
 
       await fetchClaims();
     } catch (err) {
-      console.error("Mark returned error:", err);
+      console.error("Mark item returned error:", err);
       alert("Failed to mark item as returned.");
     } finally {
       setBusyReturnId(null);
     }
   }
 
-  /* ========================= FILTERS & STATS ========================= */
+  /* ------------------------------------------------------------------------ */
+  /*                             FILTERS & STATS                              */
+  /* ------------------------------------------------------------------------ */
 
   const filteredClaims = useMemo(() => {
     const term = search.trim().toLowerCase();
 
     return claims.filter((c) => {
-      const statusValue = (c.status || "pending").toLowerCase();
+      const effectiveStatus = (c.status || "pending").toLowerCase();
 
       const statusOk =
-        statusFilter === "all" || statusValue === statusFilter;
+        statusFilter === "all" || effectiveStatus === statusFilter;
 
       const haystack = [
         c.item?.name,
@@ -378,21 +504,29 @@ export default function AdminClaimsPage() {
     return { total, pending, approved, rejected };
   }, [claims]);
 
-  /* ========================= LOADING / ERROR ========================= */
+  /* ------------------------------------------------------------------------ */
+  /*                            LOADING / ERROR UI                            */
+  /* ------------------------------------------------------------------------ */
 
-  if (loading)
+  if (loading) {
     return (
-      <div className="text-center py-10 text-gray-400">Loading claims…</div>
+      <div className="text-center py-10 text-gray-400">
+        Loading claims…
+      </div>
     );
+  }
 
-  if (errorMsg)
+  if (errorMsg) {
     return (
       <div className="text-center py-10 text-red-400">
         Failed to load claims: {errorMsg}
       </div>
     );
+  }
 
-  /* ========================= LIST VIEW ========================= */
+  /* ------------------------------------------------------------------------ */
+  /*                               LIST VIEW UI                               */
+  /* ------------------------------------------------------------------------ */
 
   if (!selectedClaim) {
     return (
@@ -486,15 +620,11 @@ export default function AdminClaimsPage() {
                     <td className="px-4 py-3 font-semibold text-ubGold">
                       {c.item?.name || "—"}
                     </td>
-                    <td className="px-4 py-3">
-                      {c.campus || "—"}
-                    </td>
+                    <td className="px-4 py-3">{c.campus || "—"}</td>
                     <td className="px-4 py-3">
                       {c.user?.email || c.user?.full_name || "—"}
                     </td>
-                    <td className="px-4 py-3">
-                      {c.category || "—"}
-                    </td>
+                    <td className="px-4 py-3">{c.category || "—"}</td>
                     <td className="px-4 py-3">
                       <span
                         className={`px-3 py-1 rounded-full text-xs font-semibold ${
@@ -560,7 +690,9 @@ export default function AdminClaimsPage() {
     );
   }
 
-  /* ========================= CHAT VIEW ========================= */
+  /* ------------------------------------------------------------------------ */
+  /*                                CHAT VIEW UI                              */
+  /* ------------------------------------------------------------------------ */
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
