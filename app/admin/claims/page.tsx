@@ -3,7 +3,10 @@
 import { useEffect, useState, useRef } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
-// TYPES BASED ON YOUR NEW SCHEMA 🔥🔥
+// =========================
+// TYPES MATCHING YOUR SCHEMA
+// =========================
+
 type Item = {
   id: string;
   name: string;
@@ -21,6 +24,7 @@ type Claim = {
   message: string | null;
   status: string | null;
   created_at: string;
+  updated_at: string | null;
   item?: Item | null;
   profiles?: {
     full_name: string | null;
@@ -51,20 +55,33 @@ export default function AdminClaimsPage() {
   const [newMessage, setNewMessage] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Auto scroll chat
+  // Auto scroll on messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // FETCH ALL CLAIMS (JOIN PROFILES + ITEMS) ✔️
+  // =========================
+  // LOAD ALL CLAIMS
+  // =========================
   useEffect(() => {
     async function loadClaims() {
-      const { data: claimRows } = await supabase
+      const { data: claimRows, error: claimErr } = await supabase
         .from("claims")
         .select("*, profiles:claimed_by(full_name,email)")
         .order("created_at", { ascending: false });
 
-      if (!claimRows) return setClaims([]);
+      if (claimErr) {
+        console.error("Error loading claims:", claimErr);
+        setClaims([]);
+        setLoading(false);
+        return;
+      }
+
+      if (!claimRows || claimRows.length === 0) {
+        setClaims([]);
+        setLoading(false);
+        return;
+      }
 
       const result: Claim[] = [];
 
@@ -73,15 +90,15 @@ export default function AdminClaimsPage() {
           .from("items")
           .select("*")
           .eq("id", claim.item_id)
-          .single();
+          .maybeSingle();
 
         let imageUrl = null;
+
         if (item?.image) {
-          const { data: img } = supabase.storage
+          const { data: urlData } = supabase.storage
             .from("item-photos")
             .getPublicUrl(item.image);
-
-          imageUrl = img?.publicUrl ?? null;
+          imageUrl = urlData?.publicUrl || null;
         }
 
         result.push({
@@ -102,20 +119,24 @@ export default function AdminClaimsPage() {
     loadClaims();
   }, []);
 
-  // FETCH MESSAGES + REALTIME ✔️
+  // =========================
+  // LOAD MESSAGES + REALTIME
+  // =========================
   useEffect(() => {
     if (!selectedClaim) return;
 
     const claimId = selectedClaim.id;
 
     async function loadMessages() {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("messages")
         .select(
           "id, claim_id, sender_id, content, file_url, created_at, is_admin, seen, profiles:sender_id(full_name,email)"
         )
         .eq("claim_id", claimId)
         .order("created_at", { ascending: true });
+
+      if (error) console.error("Message load error:", error);
 
       const normalized = (data || []).map((m: any) => ({
         ...m,
@@ -124,7 +145,7 @@ export default function AdminClaimsPage() {
 
       setMessages(normalized);
 
-      // MARK USER MESSAGES AS SEEN
+      // Mark user messages as seen
       await supabase
         .from("messages")
         .update({ seen: true })
@@ -137,13 +158,14 @@ export default function AdminClaimsPage() {
     const channel = supabase
       .channel(`claim-${claimId}`)
       .on(
-        "postgres_changes" as any,
-        { event: "INSERT", table: "messages", filter: `claim_id=eq.${claimId}` },
-        (payload: any) => {
-          // Supabase realtime payload may nest the row under payload.payload.new for broadcast events,
-          // fall back to payload.new if present.
-          const newRow = payload?.payload?.new ?? payload?.new;
-          setMessages((prev) => [...prev, newRow as Message]);
+        "postgres_changes",
+        {
+          event: "INSERT",
+          table: "messages",
+          filter: `claim_id=eq.${claimId}`,
+        },
+        (payload) => {
+          setMessages((prev) => [...prev, payload.new as Message]);
         }
       )
       .subscribe();
@@ -153,7 +175,9 @@ export default function AdminClaimsPage() {
     };
   }, [selectedClaim]);
 
-  // SEND TEXT MESSAGE ✔️
+  // =========================
+  // SEND TEXT MESSAGE
+  // =========================
   async function sendMessage(e: any) {
     e.preventDefault();
     if (!newMessage.trim() || !selectedClaim) return;
@@ -178,7 +202,9 @@ export default function AdminClaimsPage() {
     setNewMessage("");
   }
 
-  // SEND IMAGE ✔️
+  // =========================
+  // SEND IMAGE MESSAGE
+  // =========================
   async function sendImage(e: any) {
     const file = e.target.files?.[0];
     e.target.value = "";
@@ -187,17 +213,20 @@ export default function AdminClaimsPage() {
     const ext = file.name.split(".").pop();
     const path = `${selectedClaim.id}/${Date.now()}.${ext}`;
 
-    const { error } = await supabase.storage
+    const { error: uploadErr } = await supabase.storage
       .from("chat-attachments")
       .upload(path, file);
 
-    if (error) return;
+    if (uploadErr) {
+      console.error(uploadErr);
+      return;
+    }
 
-    const { data } = supabase.storage
+    const { data: urlData } = supabase.storage
       .from("chat-attachments")
       .getPublicUrl(path);
 
-    const url = data?.publicUrl;
+    const imageUrl = urlData?.publicUrl ?? null;
 
     const {
       data: { user },
@@ -210,14 +239,16 @@ export default function AdminClaimsPage() {
         claim_id: selectedClaim.id,
         sender_id: user.id,
         content: null,
-        file_url: url,
+        file_url: imageUrl,
         is_admin: true,
         seen: false,
       },
     ]);
   }
 
+  // =========================
   // UI — CLAIM LIST VIEW
+  // =========================
   if (!selectedClaim) {
     return (
       <div className="max-w-6xl mx-auto p-6">
@@ -227,6 +258,8 @@ export default function AdminClaimsPage() {
 
         {loading ? (
           <p className="text-center text-gray-400">Loading…</p>
+        ) : claims.length === 0 ? (
+          <p className="text-center text-gray-500">No claims found.</p>
         ) : (
           <div className="grid md:grid-cols-2 gap-6">
             {claims.map((c) => (
@@ -258,9 +291,9 @@ export default function AdminClaimsPage() {
                       : c.status === "rejected"
                       ? "bg-red-600"
                       : "bg-yellow-600"
-                  }`}
+                  } text-white`}
                 >
-                  {c.status}
+                  {c.status || "pending"}
                 </span>
               </div>
             ))}
@@ -270,7 +303,9 @@ export default function AdminClaimsPage() {
     );
   }
 
+  // =========================
   // UI — CHAT VIEW
+  // =========================
   return (
     <div className="max-w-4xl mx-auto p-6">
       <button
@@ -285,7 +320,7 @@ export default function AdminClaimsPage() {
           {selectedClaim.item?.name}
         </h2>
 
-        {/* CHAT */}
+        {/* CHAT MESSAGES */}
         <div className="h-[60vh] overflow-y-auto space-y-4 p-2 border-y border-gray-700">
           {messages.map((msg) => {
             const isMine = msg.is_admin;
@@ -320,7 +355,7 @@ export default function AdminClaimsPage() {
                     />
                   )}
 
-                  {/* Time */}
+                  {/* Time + Seen */}
                   <div className="text-[10px] opacity-60 mt-1">
                     {new Date(msg.created_at).toLocaleTimeString([], {
                       hour: "2-digit",
@@ -341,7 +376,7 @@ export default function AdminClaimsPage() {
           <div ref={messagesEndRef} />
         </div>
 
-        {/* INPUT */}
+        {/* INPUT BAR */}
         <form onSubmit={sendMessage} className="flex items-center gap-3 pt-3">
           <label className="cursor-pointer bg-gray-800 px-3 py-2 rounded-lg border border-gray-700">
             📎
