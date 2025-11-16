@@ -66,7 +66,7 @@ type Message = {
   profiles?: {
     full_name: string | null;
     email: string | null;
-  };
+  } | null;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -291,11 +291,11 @@ export default function AdminClaimsPage() {
       }
 
       // Normalize Supabase response: profiles can be returned as an array when
-      // using a foreign-table select like `profiles:sender_id(...)`. Convert
-      // it to the single object shape expected by our Message type.
-      const normalized = (data || []).map((d: any) => {
+      // using a foreign-table select like `profiles:sender_id(...)`
+      const normalized: Message[] = (data || []).map((d: any) => {
         const profilesField = d.profiles;
-        let profileObj: { full_name: string | null; email: string | null } | null = null;
+        let profileObj: { full_name: string | null; email: string | null } | null =
+          null;
 
         if (Array.isArray(profilesField)) {
           profileObj = profilesField[0] || null;
@@ -309,9 +309,9 @@ export default function AdminClaimsPage() {
           sender_id: d.sender_id,
           content: d.content,
           created_at: d.created_at,
-          is_admin: d.is_admin,
+          is_admin: !!d.is_admin,
           profiles: profileObj,
-        } as Message;
+        };
       });
 
       setMessages(normalized);
@@ -329,8 +329,9 @@ export default function AdminClaimsPage() {
           schema: "public",
           filter: `claim_id=eq.${claimId}`,
         },
-        (payload) => {
-          setMessages((prev) => [...prev, payload.new as Message]);
+        () => {
+          // Re-load full history so we always have profiles + correct shape
+          loadMessages();
         }
       )
       .subscribe();
@@ -364,7 +365,7 @@ export default function AdminClaimsPage() {
         claim_id: selectedClaim.id,
         sender_id: user.id,
         content: newMessage.trim(),
-        is_admin: true,
+        is_admin: true, // 👈 mark clearly as admin message
       },
     ]);
 
@@ -418,12 +419,11 @@ export default function AdminClaimsPage() {
         status: "Claimed",
       };
 
-      // Add claimed_at field if you have it; otherwise remove
-      // @ts-ignore - if you added claimed_at column
+      // @ts-ignore if you have claimed_at column
       itemUpdate.claimed_at = nowIso;
 
       if (claim.user?.id) {
-        // @ts-ignore - if you have claimed_by column
+        // @ts-ignore if you have claimed_by column
         itemUpdate.claimed_by = claim.user.id;
       }
 
@@ -753,9 +753,7 @@ export default function AdminClaimsPage() {
 
         <div className="h-[50vh] overflow-y-auto space-y-3 mb-4 p-2 border-t border-b border-gray-700">
           {messages.map((msg) => {
-            const isAdmin =
-              msg.profiles?.email &&
-              !msg.profiles.email.endsWith("@ub.edu.bz");
+            const isAdmin = !!msg.is_admin; // 👈 trust DB flag
 
             return (
               <div
