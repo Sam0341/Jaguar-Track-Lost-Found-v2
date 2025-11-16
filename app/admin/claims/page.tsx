@@ -4,7 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
 // =========================
-// TYPES MATCHING YOUR SCHEMA
+// TYPES BASED ON YOUR SCHEMA
 // =========================
 
 type Item = {
@@ -55,7 +55,7 @@ export default function AdminClaimsPage() {
   const [newMessage, setNewMessage] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Auto scroll on messages
+  // Auto scroll chat
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -98,6 +98,7 @@ export default function AdminClaimsPage() {
           const { data: urlData } = supabase.storage
             .from("item-photos")
             .getPublicUrl(item.image);
+
           imageUrl = urlData?.publicUrl || null;
         }
 
@@ -155,12 +156,14 @@ export default function AdminClaimsPage() {
 
     loadMessages();
 
+    // REALTIME FIXED — NEW SYNTAX
     const channel = supabase
       .channel(`claim-${claimId}`)
       .on(
         "postgres_changes",
         {
           event: "INSERT",
+          schema: "public",
           table: "messages",
           filter: `claim_id=eq.${claimId}`,
         },
