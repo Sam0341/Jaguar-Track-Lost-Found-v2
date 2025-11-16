@@ -48,7 +48,13 @@ type Message = {
   sender_id: string;
   content: string;
   created_at: string;
-  profiles?: { full_name: string | null; email: string | null };
+  is_admin?: boolean;
+  profiles?:
+    | {
+        full_name: string | null;
+        email: string | null;
+      }
+    | null;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -195,13 +201,25 @@ export default function AdminClaimsPage() {
     const claimId = selectedClaim.id;
 
     async function loadMessages() {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("messages")
         .select("*, profiles:sender_id(full_name,email)")
         .eq("claim_id", claimId)
         .order("created_at", { ascending: true });
 
-      setMessages(data || []);
+      if (error) {
+        console.error("Load messages error:", error);
+        setMessages([]);
+        return;
+      }
+
+      // ✅ Normalize profiles (Supabase returns an array)
+      const normalized = (data || []).map((m: any) => ({
+        ...m,
+        profiles: Array.isArray(m.profiles) ? m.profiles[0] : m.profiles,
+      }));
+
+      setMessages(normalized);
     }
 
     loadMessages();
@@ -216,8 +234,27 @@ export default function AdminClaimsPage() {
           schema: "public",
           filter: `claim_id=eq.${claimId}`,
         },
-        (payload) => {
-          setMessages((prev) => [...prev, payload.new as Message]);
+        // ✅ When a new message arrives, refetch *that* message with profile join
+        async (payload: any) => {
+          const newId = payload.new?.id;
+          if (!newId) return;
+
+          const { data, error } = await supabase
+            .from("messages")
+            .select("*, profiles:sender_id(full_name,email)")
+            .eq("id", newId)
+            .single();
+
+          if (error || !data) return;
+
+          const normalized: Message = {
+            ...(data as any),
+            profiles: Array.isArray((data as any).profiles)
+              ? (data as any).profiles[0]
+              : (data as any).profiles,
+          };
+
+          setMessages((prev) => [...prev, normalized]);
         }
       )
       .subscribe();
@@ -408,7 +445,11 @@ export default function AdminClaimsPage() {
               value={statusFilter}
               onChange={(e) =>
                 setStatusFilter(
-                  e.target.value as "all" | "pending" | "approved" | "rejected"
+                  e.target.value as
+                    | "all"
+                    | "pending"
+                    | "approved"
+                    | "rejected"
                 )
               }
               className="px-3 py-2 rounded-md bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 text-sm outline-none focus:ring-2 focus:ring-ubGold"
@@ -612,9 +653,8 @@ export default function AdminClaimsPage() {
 
         <div className="h-[50vh] overflow-y-auto space-y-3 mb-4 p-2 border-t border-b border-gray-700">
           {messages.map((msg) => {
-            const isAdmin =
-              msg.profiles?.email &&
-              !msg.profiles.email.endsWith("@ub.edu.bz");
+            // ✅ use is_admin flag from DB
+            const isAdmin = msg.is_admin === true;
 
             return (
               <div
@@ -630,7 +670,11 @@ export default function AdminClaimsPage() {
                 >
                   <div className="flex justify-between mb-1">
                     <span className="text-xs opacity-70">
-                      {isAdmin ? "Admin" : msg.profiles?.email || "User"}
+                      {isAdmin
+                        ? "Admin"
+                        : msg.profiles?.email ||
+                          msg.profiles?.full_name ||
+                          "User"}
                     </span>
                     <span className="text-[10px] opacity-70">
                       {new Date(msg.created_at).toLocaleTimeString([], {
