@@ -166,6 +166,7 @@ export default function AdminClaimsPage() {
   useEffect(() => {
     setLoading(true);
     fetchClaims();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /* ========================= REALTIME DASHBOARD ========================= */
@@ -174,12 +175,12 @@ export default function AdminClaimsPage() {
     const channel = supabase
       .channel("admin-claims-dashboard")
       .on(
-        "postgres_changes",
+        "postgres_changes" as any,
         {
           schema: "public",
           table: "claims",
           event: "*",
-        },
+        } as any,
         () => {
           // whenever a claim is inserted/updated/deleted, refresh dashboard
           fetchClaims();
@@ -227,13 +228,13 @@ export default function AdminClaimsPage() {
     const channel = supabase
       .channel(`claim-${claimId}`)
       .on(
-        "postgres_changes",
+        "postgres_changes" as any,
         {
           event: "INSERT",
           table: "messages",
           schema: "public",
           filter: `claim_id=eq.${claimId}`,
-        },
+        } as any,
         // ✅ When a new message arrives, refetch *that* message with profile join
         async (payload: any) => {
           const newId = payload.new?.id;
