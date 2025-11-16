@@ -80,7 +80,7 @@ export default function AdminClaimsPage() {
     setErrorMsg(null);
 
     try {
-      // 1️⃣ Load raw claims
+      // 1️⃣ Load raw claims (whatever RLS allows this admin user to see)
       const { data: claimRows, error: claimErr } = await supabase
         .from("claims")
         .select("*")
@@ -91,19 +91,22 @@ export default function AdminClaimsPage() {
       const final: ClaimView[] = [];
 
       // 2️⃣ For each claim, join items + user + campus + category manually
-      for (const row of claimRows as ClaimRow[]) {
+      for (const row of (claimRows || []) as ClaimRow[]) {
+        // item
         const { data: item } = await supabase
           .from("items")
           .select("*")
           .eq("id", row.item_id)
           .single();
 
+        // claimant profile
         const { data: user } = await supabase
           .from("profiles")
           .select("id, full_name, email")
           .eq("id", row.claimed_by)
           .single();
 
+        // campus
         const { data: campus } =
           item?.campus_id
             ? await supabase
@@ -111,8 +114,9 @@ export default function AdminClaimsPage() {
                 .select("name")
                 .eq("id", item.campus_id)
                 .single()
-            : { data: null };
+            : { data: null as any };
 
+        // category
         const { data: category } =
           item?.category_id
             ? await supabase
@@ -120,9 +124,9 @@ export default function AdminClaimsPage() {
                 .select("name")
                 .eq("id", item.category_id)
                 .single()
-            : { data: null };
+            : { data: null as any };
 
-        // 3️⃣ Fix image URL
+        // 3️⃣ Fix image URL from storage bucket
         let imageUrl: string | null = null;
         if (item?.image) {
           const { data: url } = supabase.storage
@@ -149,6 +153,7 @@ export default function AdminClaimsPage() {
       }
 
       setClaims(final);
+      console.log("Admin claims loaded:", final.length);
     } catch (err: any) {
       console.error("Fetch claims error:", err);
       setErrorMsg(err.message || "Failed to fetch claims");
@@ -160,6 +165,7 @@ export default function AdminClaimsPage() {
   useEffect(() => {
     setLoading(true);
     fetchClaims();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /* ========================= REALTIME DASHBOARD ========================= */
@@ -271,7 +277,7 @@ export default function AdminClaimsPage() {
 
       await fetchClaims();
     } catch (err) {
-      console.error(err);
+      console.error("updateClaimStatus error:", err);
     } finally {
       setBusyStatusId(null);
     }
@@ -408,7 +414,11 @@ export default function AdminClaimsPage() {
               value={statusFilter}
               onChange={(e) =>
                 setStatusFilter(
-                  e.target.value as "all" | "pending" | "approved" | "rejected"
+                  e.target.value as
+                    | "all"
+                    | "pending"
+                    | "approved"
+                    | "rejected"
                 )
               }
               className="px-3 py-2 rounded-md bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 text-sm outline-none focus:ring-2 focus:ring-ubGold"
@@ -594,7 +604,6 @@ export default function AdminClaimsPage() {
               {selectedClaim.status || "pending"}
             </span>
 
-            {/* Mark returned also visible inside chat */}
             {(selectedClaim.status || "pending") === "approved" &&
               selectedClaim.item?.status !== "Claimed" && (
                 <button
