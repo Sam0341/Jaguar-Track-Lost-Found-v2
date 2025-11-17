@@ -164,7 +164,6 @@ export default function AdminClaimsPage() {
     setLoading(true);
     fetchClaims();
   }, []);
-
   /* ========================= REALTIME DASHBOARD ========================= */
 
   useEffect(() => {
@@ -400,7 +399,6 @@ export default function AdminClaimsPage() {
       setBusyReturnId(null);
     }
   }
-
   /* ========================= FILTERS & STATS ========================= */
 
   const filteredClaims = useMemo(() => {
@@ -623,7 +621,6 @@ export default function AdminClaimsPage() {
       </div>
     );
   }
-
   /* ========================= CHAT VIEW ========================= */
 
   return (
