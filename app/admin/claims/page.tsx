@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  FormEvent,
+} from "react";
 import { supabase } from "@/lib/supabaseClient";
 
 /* ---------------------------------- TYPES ---------------------------------- */
@@ -172,6 +178,7 @@ export default function AdminClaimsPage() {
           event: "*",
         },
         () => {
+          // refresh list when any claim changes
           fetchClaims();
         }
       )
@@ -180,6 +187,7 @@ export default function AdminClaimsPage() {
     return () => {
       supabase.removeChannel(channel);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /* ========================= CHAT: LOAD MESSAGES ========================= */
@@ -200,6 +208,7 @@ export default function AdminClaimsPage() {
     }
 
     loadMessages();
+
     const channel = supabase
       .channel(`claim-${claimId}`)
       .on(
@@ -227,7 +236,7 @@ export default function AdminClaimsPage() {
 
   /* ========================= SEND MESSAGE (ADMIN) ========================= */
 
-  async function sendMessage(e: React.FormEvent) {
+  async function sendMessage(e: FormEvent) {
     e.preventDefault();
     if (!selectedClaim || !newMessage.trim()) return;
 
@@ -246,6 +255,74 @@ export default function AdminClaimsPage() {
     ]);
 
     setNewMessage("");
+  }
+
+  /* ========================= EXPORT CHAT TRANSCRIPT ========================= */
+
+  function downloadChatTranscript() {
+    if (!selectedClaim) return;
+
+    if (messages.length === 0) {
+      alert("No messages to export for this claim yet.");
+      return;
+    }
+
+    const headerLines: string[] = [];
+
+    headerLines.push("Jaguar Track Lost & Found – Claim Chat Transcript");
+    headerLines.push("--------------------------------------------------");
+    headerLines.push(`Claim ID: ${selectedClaim.id}`);
+    headerLines.push(
+      `Item: ${selectedClaim.item?.name || "Unknown item"} (${selectedClaim.item?.id})`
+    );
+    headerLines.push(
+      `User: ${
+        selectedClaim.user?.full_name || selectedClaim.user?.email || "Unknown user"
+      }`
+    );
+    headerLines.push(
+      `Campus: ${selectedClaim.campus || "N/A"} | Category: ${
+        selectedClaim.category || "N/A"
+      }`
+    );
+    headerLines.push(
+      `Claim status: ${selectedClaim.status || "pending"} | Item status: ${
+        selectedClaim.item?.status || "N/A"
+      }`
+    );
+    headerLines.push("");
+
+    const lines: string[] = [...headerLines];
+
+    messages.forEach((msg) => {
+      const isAdmin = msg.sender_id !== selectedClaim.user?.id;
+      const who = isAdmin
+        ? "ADMIN"
+        : msg.profiles?.full_name ||
+          msg.profiles?.email ||
+          "USER";
+
+      const time = new Date(msg.created_at).toLocaleString();
+
+      lines.push(`[${time}] ${who}: ${msg.content}`);
+    });
+
+    const text = lines.join("\n");
+    const blob = new Blob([text], {
+      type: "text/plain;charset=utf-8",
+    });
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = `claim-${selectedClaim.id}-chat.txt`;
+
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    URL.revokeObjectURL(url);
   }
 
   /* ========================= APPROVE / REJECT ========================= */
@@ -388,6 +465,7 @@ export default function AdminClaimsPage() {
           Claims Management
         </h1>
 
+        {/* Filters + Counters */}
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
           <div className="flex gap-2 flex-wrap items-center">
             <input
@@ -400,7 +478,11 @@ export default function AdminClaimsPage() {
               value={statusFilter}
               onChange={(e) =>
                 setStatusFilter(
-                  e.target.value as "all" | "pending" | "approved" | "rejected"
+                  e.target.value as
+                    | "all"
+                    | "pending"
+                    | "approved"
+                    | "rejected"
                 )
               }
               className="px-3 py-2 rounded-md bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 text-sm outline-none focus:ring-2 focus:ring-ubGold"
@@ -412,6 +494,7 @@ export default function AdminClaimsPage() {
             </select>
           </div>
 
+          {/* Realtime counters */}
           <div className="flex flex-wrap gap-2 text-xs md:text-sm">
             <span className="px-3 py-1 rounded-full bg-gray-200 dark:bg-gray-800 text-gray-800 dark:text-gray-100">
               Total: <b>{stats.total}</b>
@@ -428,6 +511,7 @@ export default function AdminClaimsPage() {
           </div>
         </div>
 
+        {/* Table */}
         <div className="bg-gray-900 rounded-xl shadow border border-gray-700 overflow-hidden">
           <table className="min-w-full text-sm">
             <thead className="bg-gray-700 text-gray-200">
@@ -584,18 +668,28 @@ export default function AdminClaimsPage() {
               {selectedClaim.status || "pending"}
             </span>
 
-            {(selectedClaim.status || "pending") === "approved" &&
-              selectedClaim.item?.status !== "Claimed" && (
-                <button
-                  onClick={() => markItemReturned(selectedClaim)}
-                  disabled={busyReturnId === selectedClaim.id}
-                  className="px-3 py-1 bg-ubGold text-black rounded text-xs disabled:opacity-50"
-                >
-                  {busyReturnId === selectedClaim.id
-                    ? "Marking…"
-                    : "Mark Item Returned"}
-                </button>
-              )}
+            <div className="flex gap-2 mt-1">
+              {(selectedClaim.status || "pending") === "approved" &&
+                selectedClaim.item?.status !== "Claimed" && (
+                  <button
+                    onClick={() => markItemReturned(selectedClaim)}
+                    disabled={busyReturnId === selectedClaim.id}
+                    className="px-3 py-1 bg-ubGold text-black rounded text-xs disabled:opacity-50"
+                  >
+                    {busyReturnId === selectedClaim.id
+                      ? "Marking…"
+                      : "Mark Item Returned"}
+                  </button>
+                )}
+
+              {/* NEW: Download chat transcript */}
+              <button
+                onClick={downloadChatTranscript}
+                className="px-3 py-1 bg-gray-700 text-white rounded text-xs hover:bg-gray-600"
+              >
+                Download Chat
+              </button>
+            </div>
           </div>
         </div>
 
@@ -606,7 +700,9 @@ export default function AdminClaimsPage() {
             return (
               <div
                 key={msg.id}
-                className={`flex ${isAdmin ? "justify-end" : "justify-start"}`}
+                className={`flex ${
+                  isAdmin ? "justify-end" : "justify-start"
+                }`}
               >
                 <div
                   className={`p-3 rounded-xl max-w-[70%] ${
