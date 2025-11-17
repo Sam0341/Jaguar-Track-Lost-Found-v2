@@ -165,7 +165,7 @@ export default function AdminClaimsPage() {
     fetchClaims();
   }, []);
 
-  /* ========================= REALTIME CLAIMS UPDATES ========================= */
+  /* ========================= REALTIME DASHBOARD ========================= */
 
   useEffect(() => {
     const channel = supabase
@@ -178,6 +178,7 @@ export default function AdminClaimsPage() {
           event: "*",
         },
         () => {
+          // refresh list when any claim changes
           fetchClaims();
         }
       )
@@ -186,9 +187,10 @@ export default function AdminClaimsPage() {
     return () => {
       supabase.removeChannel(channel);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ========================= LOAD CHAT HISTORY ========================= */
+  /* ========================= CHAT: LOAD MESSAGES ========================= */
 
   useEffect(() => {
     if (!selectedClaim) return;
@@ -232,7 +234,7 @@ export default function AdminClaimsPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  /* ========================= SEND MESSAGE ========================= */
+  /* ========================= SEND MESSAGE (ADMIN) ========================= */
 
   async function sendMessage(e: FormEvent) {
     e.preventDefault();
@@ -255,38 +257,58 @@ export default function AdminClaimsPage() {
     setNewMessage("");
   }
 
-  /* ========================= EXPORT CHAT (.TXT) ========================= */
+  /* ========================= EXPORT CHAT TRANSCRIPT ========================= */
 
   function downloadChatTranscript() {
     if (!selectedClaim) return;
 
-    const lines: string[] = [];
+    if (messages.length === 0) {
+      alert("No messages to export for this claim yet.");
+      return;
+    }
 
-    lines.push("Jaguar Track Lost & Found – Chat Transcript");
-    lines.push("--------------------------------------------------");
-    lines.push(`Claim ID: ${selectedClaim.id}`);
-    lines.push(`Item: ${selectedClaim.item?.name}`);
-    lines.push(
+    const headerLines: string[] = [];
+
+    headerLines.push("Jaguar Track Lost & Found – Claim Chat Transcript");
+    headerLines.push("--------------------------------------------------");
+    headerLines.push(`Claim ID: ${selectedClaim.id}`);
+    headerLines.push(
+      `Item: ${selectedClaim.item?.name || "Unknown item"} (${selectedClaim.item?.id})`
+    );
+    headerLines.push(
       `User: ${
-        selectedClaim.user?.full_name ||
-        selectedClaim.user?.email ||
-        "Unknown"
+        selectedClaim.user?.full_name || selectedClaim.user?.email || "Unknown user"
       }`
     );
-    lines.push("");
+    headerLines.push(
+      `Campus: ${selectedClaim.campus || "N/A"} | Category: ${
+        selectedClaim.category || "N/A"
+      }`
+    );
+    headerLines.push(
+      `Claim status: ${selectedClaim.status || "pending"} | Item status: ${
+        selectedClaim.item?.status || "N/A"
+      }`
+    );
+    headerLines.push("");
+
+    const lines: string[] = [...headerLines];
 
     messages.forEach((msg) => {
-      const who =
-        msg.sender_id === selectedClaim.user?.id
-          ? msg.profiles?.email || "USER"
-          : "ADMIN";
+      const isAdmin = msg.sender_id !== selectedClaim.user?.id;
+      const who = isAdmin
+        ? "ADMIN"
+        : msg.profiles?.full_name ||
+          msg.profiles?.email ||
+          "USER";
 
       const time = new Date(msg.created_at).toLocaleString();
 
       lines.push(`[${time}] ${who}: ${msg.content}`);
     });
 
-    const blob = new Blob([lines.join("\n")], {
+    const text = lines.join("\n");
+    const blob = new Blob([text], {
       type: "text/plain;charset=utf-8",
     });
 
@@ -373,6 +395,7 @@ export default function AdminClaimsPage() {
       await fetchClaims();
     } catch (err) {
       console.error("Mark returned error:", err);
+      alert("Failed to mark item as returned.");
     } finally {
       setBusyReturnId(null);
     }
@@ -417,7 +440,7 @@ export default function AdminClaimsPage() {
     return { total, pending, approved, rejected };
   }, [claims]);
 
-  /* ========================= LOADING ========================= */
+  /* ========================= LOADING / ERROR ========================= */
 
   if (loading)
     return (
@@ -429,7 +452,7 @@ export default function AdminClaimsPage() {
   if (errorMsg)
     return (
       <div className="text-center py-10 text-red-400">
-        Failed: {errorMsg}
+        Failed to load claims: {errorMsg}
       </div>
     );
 
@@ -442,15 +465,15 @@ export default function AdminClaimsPage() {
           Claims Management
         </h1>
 
+        {/* Filters + Counters */}
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
           <div className="flex gap-2 flex-wrap items-center">
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search…"
+              placeholder="Search by item, campus, user, category…"
               className="w-72 px-3 py-2 rounded-md bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 outline-none focus:ring-2 focus:ring-ubGold text-sm"
             />
-
             <select
               value={statusFilter}
               onChange={(e) =>
@@ -471,6 +494,7 @@ export default function AdminClaimsPage() {
             </select>
           </div>
 
+          {/* Realtime counters */}
           <div className="flex flex-wrap gap-2 text-xs md:text-sm">
             <span className="px-3 py-1 rounded-full bg-gray-200 dark:bg-gray-800 text-gray-800 dark:text-gray-100">
               Total: <b>{stats.total}</b>
@@ -487,6 +511,7 @@ export default function AdminClaimsPage() {
           </div>
         </div>
 
+        {/* Table */}
         <div className="bg-gray-900 rounded-xl shadow border border-gray-700 overflow-hidden">
           <table className="min-w-full text-sm">
             <thead className="bg-gray-700 text-gray-200">
@@ -623,7 +648,6 @@ export default function AdminClaimsPage() {
               📍 {selectedClaim.item?.location || "Unknown"} • 🏫{" "}
               {selectedClaim.campus || "Unknown campus"}
             </p>
-
             {selectedClaim.message && (
               <p className="text-sm text-gray-300 mt-2 italic">
                 “{selectedClaim.message}”
@@ -658,6 +682,7 @@ export default function AdminClaimsPage() {
                   </button>
                 )}
 
+              {/* NEW: Download chat transcript */}
               <button
                 onClick={downloadChatTranscript}
                 className="px-3 py-1 bg-gray-700 text-white rounded text-xs hover:bg-gray-600"
@@ -701,7 +726,6 @@ export default function AdminClaimsPage() {
                       })}
                     </span>
                   </div>
-
                   <p className="text-sm">{msg.content}</p>
                 </div>
               </div>
