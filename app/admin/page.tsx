@@ -13,13 +13,19 @@ export default function AdminPage() {
   useEffect(() => {
     async function checkAccess() {
       try {
-        // ✅ Step 1: Try to get Supabase user
+        // 🔥 getSession() works 100x better than getUser()
         const {
-          data: { user },
-          error,
-        } = await supabase.auth.getUser();
+          data: { session },
+        } = await supabase.auth.getSession();
 
-        // ✅ Step 2: If manual admin (local flag), allow access right away
+        if (!session) {
+          router.replace("/login");
+          return;
+        }
+
+        const user = session.user;
+
+        // 🔥 Manual admin (fallback)
         const manualAdmin = localStorage.getItem("isManualAdmin");
         if (manualAdmin === "true") {
           setIsAdmin(true);
@@ -27,57 +33,41 @@ export default function AdminPage() {
           return;
         }
 
-        // 🚫 No user, no manual admin → redirect
-        if (error || !user) {
-          console.warn("No Supabase user found");
-          router.push("/login");
-          return;
-        }
-
-        // ✅ Step 3: Fetch user profile from DB
-        const { data: profile, error: profileError } = await supabase
+        // 🔥 Safe profile fetch — no .single() crashes
+        const { data: profile } = await supabase
           .from("profiles")
           .select("role")
           .eq("id", user.id)
-          .single();
+          .maybeSingle();
 
-        if (profileError) {
-          console.error("Profile fetch error:", profileError);
-          router.push("/login");
-          return;
-        }
-
-        // ✅ Step 4: If role is admin, grant access
+        // 🔥 If admin, allow
         if (profile?.role === "admin") {
           setIsAdmin(true);
         } else {
-          console.warn("Access denied: not admin");
-          router.push("/login");
+          router.replace("/unauthorized");
+          return;
         }
       } catch (err) {
         console.error("Admin access error:", err);
-        router.push("/login");
+        router.replace("/login");
       } finally {
         setLoading(false);
       }
     }
 
     checkAccess();
-  }, [router]);
+  }, []);
 
-  // 🌀 Loading State
   if (loading) {
     return (
-      <div className="flex justify-center items-center h-[70vh] text-lg text-gray-600 dark:text-gray-300">
+      <div className="flex justify-center items-center h-[70vh] text-lg text-gray-400">
         Verifying admin access...
       </div>
     );
   }
 
-  // 🚫 Not admin (hidden for security)
   if (!isAdmin) return null;
 
-  // ✅ Admin Access Granted
   return (
     <section className="animate-fade-in">
       <AdminDashboard />
