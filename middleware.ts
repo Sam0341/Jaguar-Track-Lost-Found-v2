@@ -3,39 +3,43 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 export async function middleware(req: NextRequest) {
-  const res = NextResponse.next();
+  let res = NextResponse.next();
+
   const supabase = createMiddlewareClient({ req, res });
 
-  // Refresh session
+  // Always refresh session
   const {
-    data: { user },
-  } = await supabase.auth.getUser();
+    data: { session },
+  } = await supabase.auth.getSession();
 
   const pathname = req.nextUrl.pathname;
 
-  // If no user, block protected routes
-  if (!user) {
+  // Not logged in → protect routes
+  if (!session) {
     if (pathname.startsWith("/admin") || pathname.startsWith("/staff")) {
       return NextResponse.redirect(new URL("/login", req.url));
     }
     return res;
   }
 
-  // Fetch profile to check the role
-  const { data: profile } = await supabase
+  const user = session.user;
+
+  // Safe profile fetch
+  const { data: profile, error } = await supabase
     .from("profiles")
     .select("role")
     .eq("id", user.id)
-    .single();
+    .maybeSingle(); // <-- prevents 500 errors
 
-  const role = profile?.role || "user";
+  // Default role if profile missing
+  const role = profile?.role ?? "user";
 
-  // ADMIN ROUTES
+  // ADMIN protection
   if (pathname.startsWith("/admin") && role !== "admin") {
     return NextResponse.redirect(new URL("/unauthorized", req.url));
   }
 
-  // STAFF ROUTES (admin also allowed)
+  // STAFF protection
   if (pathname.startsWith("/staff") && !["staff", "admin"].includes(role)) {
     return NextResponse.redirect(new URL("/unauthorized", req.url));
   }
