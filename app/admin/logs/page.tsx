@@ -2,13 +2,18 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import { Download, Trash2, CheckCircle, RefreshCcw, Edit, Eye } from "lucide-react";
 
-// TYPES
 type LogEntry = {
   id: string;
   action: string;
   timestamp: string;
-  item: { name: string | null };
+  items: {
+    name: string | null;
+    image: string | null;
+    status: string | null;
+    campus: string | null;
+  };
   performer: { email: string | null };
 };
 
@@ -16,7 +21,6 @@ export default function LogsPage() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const logsPerPage = 8;
 
@@ -29,42 +33,67 @@ export default function LogsPage() {
           id,
           action,
           timestamp,
-          item:item_id ( name ),
+          items:item_id (
+            name,
+            image,
+            status,
+            campus
+          ),
           performer:performed_by ( email )
         `
         )
         .order("timestamp", { ascending: false });
 
       if (!error && data) {
-        setLogs(
-          data.map((log: any) => ({
-            id: log.id,
-            action: log.action,
-            timestamp: log.timestamp,
-            item: log.item?.[0] || { name: null },
-            performer: log.performer?.[0] || { email: null },
-          }))
-        );
+        // 🔥 Normalize data so TS never breaks
+        const fixed = data.map((log: any) => ({
+          id: log.id,
+          action: log.action,
+          timestamp: log.timestamp,
+
+          items: log.items ?? {
+            name: null,
+            image: null,
+            status: null,
+            campus: null,
+          },
+
+          performer: log.performer ?? {
+            email: null,
+          },
+        }));
+
+        setLogs(fixed);
       }
+
       setLoading(false);
     }
 
     loadLogs();
   }, []);
 
-  // Pagination logic
   const indexOfLast = currentPage * logsPerPage;
   const indexOfFirst = indexOfLast - logsPerPage;
   const currentLogs = logs.slice(indexOfFirst, indexOfLast);
   const totalPages = Math.ceil(logs.length / logsPerPage);
 
-  // Export CSV
+  // CSV EXPORT
   const exportCSV = () => {
-    const headers = ["Action", "Item", "Performer", "Timestamp"];
+    const headers = [
+      "Action",
+      "Item",
+      "Status",
+      "Campus",
+      "Performer",
+      "Timestamp",
+    ];
+
     const rows = logs.map((l) => [
       `"${l.action}"`,
-      `"${l.item?.name || "Unknown"}"`,
-      `"${l.performer?.email || "System"}"`,
+      `"${l.items.name || "Unknown"}"`,
+      `"${l.items.status || "N/A"}"`,
+      `"${l.items.campus || "N/A"}"`,
+      `"${l.performer.email || "System"}"`,
       `"${new Date(l.timestamp).toLocaleString()}"`,
     ]);
 
@@ -72,31 +101,30 @@ export default function LogsPage() {
       "data:text/csv;charset=utf-8," +
       [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
 
-    const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute(
-      "download",
-      `JaguarTrack_Logs_${new Date().toISOString()}.csv`
-    );
-    document.body.appendChild(link);
+    link.href = encodeURI(csvContent);
+    link.download = `JaguarTrack_SystemLogs_${new Date().toISOString()}.csv`;
     link.click();
-    link.remove();
   };
 
-  // Badge colors
-  const badgeColor = (action: string) => {
-    if (action.toLowerCase().includes("delete")) return "bg-red-600";
-    if (action.toLowerCase().includes("approve")) return "bg-green-600";
-    if (action.toLowerCase().includes("update")) return "bg-blue-600";
-    if (action.toLowerCase().includes("claim")) return "bg-yellow-600";
-    return "bg-gray-600";
+  const actionStyle = {
+    item_deleted: "bg-red-600",
+    item_claimed: "bg-green-600",
+    item_returned: "bg-blue-600",
+    item_updated: "bg-yellow-600",
+    report_created: "bg-purple-600",
+  };
+
+  const actionIcon = (action: string) => {
+    if (action.includes("delete")) return <Trash2 size={16} />;
+    if (action.includes("claim")) return <CheckCircle size={16} />;
+    if (action.includes("return")) return <RefreshCcw size={16} />;
+    if (action.includes("update")) return <Edit size={16} />;
+    return <Eye size={16} />;
   };
 
   if (loading)
-    return (
-      <p className="text-center mt-10 text-gray-400">Loading logs…</p>
-    );
+    return <p className="text-center mt-10 text-gray-400">Loading logs…</p>;
 
   return (
     <div className="container mx-auto p-6">
@@ -106,49 +134,71 @@ export default function LogsPage() {
 
         <button
           onClick={exportCSV}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow"
+          className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow"
         >
-          ⬇ Export CSV
+          <Download size={16} /> Export CSV
         </button>
       </div>
 
-      {/* Logs Container */}
-      <div className="bg-gray-900 p-4 rounded-xl shadow border border-gray-800">
-        {logs.length === 0 ? (
-          <p className="text-gray-400 text-center py-10">No logs yet.</p>
-        ) : (
-          <ul className="space-y-4">
-            {currentLogs.map((log) => (
-              <li
-                key={log.id}
-                className="p-4 bg-gray-800 rounded-lg border border-gray-700"
+      {/* Logs */}
+      <div className="space-y-4">
+        {currentLogs.map((log) => (
+          <div
+            key={log.id}
+            className="flex gap-4 bg-gray-900 border border-gray-700 p-4 rounded-xl shadow"
+          >
+            {/* ITEM IMAGE */}
+            <div className="w-20 h-20 rounded overflow-hidden bg-gray-800">
+              {log.items.image ? (
+                <img
+                  src={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/item-photos/${log.items.image}`}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center text-gray-500">
+                  No Image
+                </div>
+              )}
+            </div>
+
+            {/* DETAILS */}
+            <div className="flex-1">
+              <span
+                className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs text-white font-semibold ${actionStyle[
+                  log.action as keyof typeof actionStyle
+                ] || "bg-gray-600"}`}
               >
-                {/* Action Badge */}
-                <span
-                  className={`px-3 py-1 rounded-full text-xs text-white font-semibold ${badgeColor(
-                    log.action
-                  )}`}
-                >
-                  {log.action}
-                </span>
+                {actionIcon(log.action)}
+                {log.action}
+              </span>
 
-                <p className="text-sm text-gray-400 mt-2">
-                  Item:{" "}
-                  <span className="text-ubGold">
-                    {log.item?.name || "Unknown"}
-                  </span>
-                </p>
+              <h2 className="text-lg text-ubGold font-bold mt-2">
+                {log.items.name || "Unknown Item"}
+              </h2>
 
-                <p className="text-sm text-gray-500">
-                  By: {log.performer?.email || "System"}
-                </p>
+              <p className="text-gray-400 text-sm">
+                Status:{" "}
+                <span className="text-white">{log.items.status || "N/A"}</span>
+              </p>
 
-                <p className="text-xs text-gray-500 mt-1">
-                  {new Date(log.timestamp).toLocaleString()}
-                </p>
-              </li>
-            ))}
-          </ul>
+              <p className="text-gray-400 text-sm">
+                Campus:{" "}
+                <span className="text-white">{log.items.campus || "N/A"}</span>
+              </p>
+
+              <p className="text-sm text-gray-500 mt-1">
+                By: {log.performer.email || "System"}
+              </p>
+
+              <p className="text-xs text-gray-500">
+                {new Date(log.timestamp).toLocaleString()}
+              </p>
+            </div>
+          </div>
+        ))}
+
+        {logs.length === 0 && (
+          <p className="text-gray-400 text-center py-10">No logs yet.</p>
         )}
       </div>
 
