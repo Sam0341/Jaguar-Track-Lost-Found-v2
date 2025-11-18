@@ -36,6 +36,16 @@ export default function StoragePage() {
   const [page, setPage] = useState(1);
   const PER_PAGE = 8;
 
+  // ⭐ NEW — Stats
+  const [stats, setStats] = useState({
+    total: 0,
+    lost: 0,
+    found: 0,
+    claimed: 0,
+    campuses: 0,
+    storages: 0,
+  });
+
   useEffect(() => {
     fetchItems();
   }, []);
@@ -52,9 +62,25 @@ export default function StoragePage() {
     if (!error && data) {
       setItems(data);
       setFilteredItems(data);
+      calculateStats(data); // ⭐ NEW
     }
 
     setLoading(false);
+  }
+
+  // ⭐ NEW — Calculate Stats
+  function calculateStats(data: Item[]) {
+    const campuses = new Set(data.map((i) => i.campus));
+    const storages = new Set(data.map((i) => i.location || "N/A"));
+
+    setStats({
+      total: data.length,
+      lost: data.filter((i) => i.status === "Lost").length,
+      found: data.filter((i) => i.status === "Found").length,
+      claimed: data.filter((i) => i.status === "Claimed").length,
+      campuses: campuses.size,
+      storages: storages.size,
+    });
   }
 
   // Filters
@@ -150,10 +176,61 @@ export default function StoragePage() {
     page * PER_PAGE
   );
 
+  // ⭐ NEW — CSV DOWNLOAD
+  function downloadCSV() {
+    const headers = [
+      "ID,Name,Category,Campus,Storage,Status,Reported_At",
+    ];
+
+    const rows = items.map(
+      (item) =>
+        `${item.id},"${item.name}",${item.category || ""},${item.campus || ""},${
+          item.location || "N/A"
+        },${item.status},${item.reported_at || ""}`
+    );
+
+    const csvContent = [...headers, ...rows].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "storage_report.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div className="p-6 max-w-7xl mx-auto">
-
       <h1 className="text-3xl font-bold text-ubGold mb-6">📦 Storage Inventory</h1>
+
+      {/* ⭐ NEW — Summary Stats */}
+      <div className="grid md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
+        {[
+          { label: "Total Items", value: stats.total },
+          { label: "Lost", value: stats.lost },
+          { label: "Found", value: stats.found },
+          { label: "Claimed", value: stats.claimed },
+          { label: "Campuses", value: stats.campuses },
+          { label: "Storage Rooms", value: stats.storages },
+        ].map((box, i) => (
+          <div
+            key={i}
+            className="bg-gray-900 border border-gray-700 rounded-lg p-4 text-center shadow"
+          >
+            <p className="text-2xl font-bold text-ubGold">{box.value}</p>
+            <p className="text-gray-400 text-sm">{box.label}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* ⭐ NEW — Download Button */}
+      <button
+        onClick={downloadCSV}
+        className="mb-6 px-4 py-2 bg-ubGold text-black font-semibold rounded shadow hover:bg-yellow-400"
+      >
+        ⬇ Download Storage Report (CSV)
+      </button>
 
       {toast && (
         <div
@@ -209,7 +286,7 @@ export default function StoragePage() {
         </select>
       </div>
 
-      {/* Table */}
+      {/* Item Grid */}
       {loading ? (
         <p className="text-gray-500 text-center py-20">Loading storage…</p>
       ) : paginatedItems.length === 0 ? (
@@ -281,7 +358,6 @@ export default function StoragePage() {
       {showModal && selectedItem && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center px-4 z-50">
           <div className="bg-gray-900 border border-gray-700 rounded-lg p-6 max-w-lg w-full relative">
-
             <button
               className="absolute top-3 right-3 text-gray-400 hover:text-white"
               onClick={() => setShowModal(false)}
@@ -294,7 +370,7 @@ export default function StoragePage() {
             </h2>
 
             <p className="text-gray-300 mb-2">
-              Current Storage:  
+              Current Storage:
               <span className="text-white"> {selectedItem.location || "N/A"}</span>
             </p>
 
