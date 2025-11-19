@@ -26,8 +26,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
 
   /* ===========================================================
    * LOAD ITEM + USER + CLAIM STATES
-   * ===========================================================
-   */
+   * =========================================================== */
   useEffect(() => {
     async function load() {
       // Load user
@@ -39,7 +38,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
         setIsAdmin(true);
       }
 
-      // Load item with reporter join FIXED
+      // Load item — FIXED JOIN
       const { data, error } = await supabase
         .from("items")
         .select(`
@@ -52,7 +51,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
           reported_at,
           campus:campus_id ( id, name ),
           category:category_id ( id, name ),
-          reporter:reported_by (
+          reporter:user_id (
             id,
             full_name,
             email
@@ -64,8 +63,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
       if (!error && data) {
         const campusObj = Array.isArray(data.campus) ? data.campus[0] : data.campus;
         const categoryObj = Array.isArray(data.category) ? data.category[0] : data.category;
-        
-        // 🔥 FIXED HERE: always grab reporter object
+
         const reporterObj =
           Array.isArray(data.reporter) ? data.reporter[0] : data.reporter;
 
@@ -81,10 +79,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
         });
       }
 
-      /* ------------------------------------------------------------------
-       * Load current user's claim (if any)
-       * ------------------------------------------------------------------
-       */
+      // Load user's claim
       if (session?.user) {
         const { data: myClaim } = await supabase
           .from("claims")
@@ -99,10 +94,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
         }
       }
 
-      /* ------------------------------------------------------------------
-       * Check if ANY pending claim exists for this item
-       * ------------------------------------------------------------------
-       */
+      // Check if ANY pending claim exists
       const { data: pendingCheck } = await supabase
         .from("claims")
         .select("id, claimed_by")
@@ -121,10 +113,6 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
     load();
   }, [params.id]);
 
-  /* ===========================================================
-   * DATE FORMATTER
-   * ===========================================================
-   */
   const formatDate = (ts: string) =>
     new Date(ts).toLocaleString("en-US", {
       weekday: "short",
@@ -137,8 +125,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
 
   /* ===========================================================
    * SUBMIT CLAIM
-   * ===========================================================
-   */
+   * =========================================================== */
   const submitClaim = async (e: any) => {
     e.preventDefault();
     if (!user) return router.push("/login");
@@ -176,10 +163,6 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
 
   const itemClaimed = item.status?.toLowerCase() === "claimed";
 
-  /* ===========================================================
-   * UI RENDER
-   * ===========================================================
-   */
   return (
     <div className="container mx-auto p-6 pb-20">
       <div className="grid md:grid-cols-2 gap-8">
@@ -212,7 +195,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
             </span>
           </div>
 
-          {/* REPORT INFO */}
+          {/* REPORTED INFO */}
           <div className="text-sm dark:text-gray-300 space-y-1 mb-6">
             <p><strong>Reported by:</strong> {item.reporter_name}</p>
             {isAdmin && <p><strong>Email:</strong> {item.reporter_email}</p>}
@@ -245,7 +228,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
             </p>
           )}
 
-          {/* CLAIM BUTTON */}
+          {/* CLAIM FORM */}
           {!claimStatus && !itemClaimed && !someoneElsePending && (
             <button
               onClick={() => setShowClaimForm(!showClaimForm)}
@@ -255,7 +238,6 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
             </button>
           )}
 
-          {/* CLAIM FORM */}
           {showClaimForm && (
             <form onSubmit={submitClaim} className="mt-4">
               <textarea
