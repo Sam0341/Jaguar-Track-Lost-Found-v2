@@ -41,21 +41,26 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
 
       // Load item
       const { data, error } = await supabase
-        .from("items")
-        .select(`
-          id,
-          name,
-          description,
-          location,
-          image,
-          status,
-          reported_at,
-          campus:campus_id ( id, name ),
-          category:category_id ( id, name ),
-          reporter:reported_by ( id, full_name, email )
-        `)
-        .eq("id", params.id)
-        .maybeSingle();
+  .from("items")
+  .select(`
+    id,
+    name,
+    description,
+    image,
+    status,
+    location,
+    campus,
+    category,
+    created_at,
+    reported_by,
+    reporter:reported_by (
+      full_name,
+      email
+    )
+  `)
+  .eq("id", params.id)
+  .single();
+
 
       if (!error && data) {
         const campusObj = Array.isArray(data.campus) ? data.campus[0] : data.campus;
