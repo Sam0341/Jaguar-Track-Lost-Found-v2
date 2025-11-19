@@ -39,33 +39,35 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
         setIsAdmin(true);
       }
 
-      // Load item
+      // Load item with reporter join FIXED
       const { data, error } = await supabase
-  .from("items")
-  .select(`
-    id,
-    name,
-    description,
-    image,
-    status,
-    location,
-    campus,
-    category,
-    created_at,
-    reported_by,
-    reporter:reported_by (
-      full_name,
-      email
-    )
-  `)
-  .eq("id", params.id)
-  .single();
-
+        .from("items")
+        .select(`
+          id,
+          name,
+          description,
+          location,
+          image,
+          status,
+          reported_at,
+          campus:campus_id ( id, name ),
+          category:category_id ( id, name ),
+          reporter:reported_by (
+            id,
+            full_name,
+            email
+          )
+        `)
+        .eq("id", params.id)
+        .maybeSingle();
 
       if (!error && data) {
         const campusObj = Array.isArray(data.campus) ? data.campus[0] : data.campus;
         const categoryObj = Array.isArray(data.category) ? data.category[0] : data.category;
-        const reporterObj = Array.isArray(data.reporter) ? data.reporter[0] : data.reporter;
+        
+        // 🔥 FIXED HERE: always grab reporter object
+        const reporterObj =
+          Array.isArray(data.reporter) ? data.reporter[0] : data.reporter;
 
         setItem({
           ...data,
@@ -80,7 +82,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
       }
 
       /* ------------------------------------------------------------------
-       * 1. Load current user's claim (if any)
+       * Load current user's claim (if any)
        * ------------------------------------------------------------------
        */
       if (session?.user) {
@@ -98,7 +100,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
       }
 
       /* ------------------------------------------------------------------
-       * 2. Check if ANY pending claim exists for this item
+       * Check if ANY pending claim exists for this item
        * ------------------------------------------------------------------
        */
       const { data: pendingCheck } = await supabase
@@ -218,26 +220,19 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
             <p><strong>Location:</strong> {item.location}</p>
           </div>
 
-          {/* ===========================================================
-           * CLAIM LOGIC & UI
-           * ===========================================================
-           */}
-
-          {/* ITEM CLAIMED (final) */}
+          {/* CLAIM MESSAGES */}
           {itemClaimed && (
             <p className="text-red-500 font-medium mb-3">
               ❌ This item has already been fully claimed.
             </p>
           )}
 
-          {/* SOMEONE ELSE HAS A PENDING CLAIM */}
           {someoneElsePending && !claimStatus && !itemClaimed && (
             <p className="text-yellow-500 font-medium mb-3">
               ⚠️ Someone else is currently claiming this item.
             </p>
           )}
 
-          {/* YOUR CLAIM STATUS */}
           {claimStatus === "pending" && (
             <p className="text-yellow-400 font-medium mb-3">
               🕒 Your claim is pending admin approval.
@@ -250,7 +245,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
             </p>
           )}
 
-          {/* CLAIM BUTTON (only if allowed) */}
+          {/* CLAIM BUTTON */}
           {!claimStatus && !itemClaimed && !someoneElsePending && (
             <button
               onClick={() => setShowClaimForm(!showClaimForm)}
@@ -281,7 +276,6 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
 
           {feedback && <p className="mt-3 text-center">{feedback}</p>}
 
-          {/* ❌ CHAT REMOVED FOR PENDING + APPROVED */}
           {(claimStatus === null || claimStatus === "rejected") && claimId && (
             <Link
               href={`/user/chat/${claimId}`}
