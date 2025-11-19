@@ -5,20 +5,29 @@ export const runtime = "nodejs";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 export default function ItemsPage() {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<any>(null);
+
   const [searchTerm, setSearchTerm] = useState("");
   const [campusFilter, setCampusFilter] = useState("All Campuses");
   const [categoryFilter, setCategoryFilter] = useState("All Categories");
 
-  const BUCKET =
-    `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/item-photos`;
+  const router = useRouter();
 
-  /* ============================================================
-   * FETCH ITEMS
-   * ============================================================ */
+  // 🔐 Check login
+  useEffect(() => {
+    async function checkAuth() {
+      const { data: { session } } = await supabase.auth.getSession();
+      setUser(session?.user || null);
+    }
+    checkAuth();
+  }, []);
+
+  // 📦 Fetch Items WITH REPORTER JOIN (FIXED)
   useEffect(() => {
     async function fetchItems() {
       try {
@@ -34,7 +43,11 @@ export default function ItemsPage() {
             location,
             campus:campus_id ( id, name ),
             category:category_id ( id, name ),
-            reporter:reported_by ( id, full_name, email )
+            reporter:reported_by (
+              id,
+              full_name,
+              email
+            )
           `)
           .order("reported_at", { ascending: false });
 
@@ -43,24 +56,18 @@ export default function ItemsPage() {
           return;
         }
 
+        const BUCKET = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/item-photos`;
+
         const mapped =
           data?.map((item: any) => {
-            const campusObj = Array.isArray(item.campus)
-              ? item.campus[0]
-              : item.campus;
-
-            const categoryObj = Array.isArray(item.category)
-              ? item.category[0]
-              : item.category;
-
             const reporterObj = Array.isArray(item.reporter)
               ? item.reporter[0]
               : item.reporter;
 
             return {
               ...item,
-              campus: campusObj?.name || "Unknown Campus",
-              category: categoryObj?.name || "Other",
+              campus: item.campus?.name || "Unknown Campus",
+              category: item.category?.name || "Other",
               reporter_name: reporterObj?.full_name || "Unknown",
               reporter_email: reporterObj?.email || "",
               image_url: item.image
@@ -82,29 +89,22 @@ export default function ItemsPage() {
     fetchItems();
   }, []);
 
-  /* ============================================================
-   * FILTERS
-   * ============================================================ */
+  // 🔎 FILTERING
   const filteredItems = items.filter((item) => {
     const matchesSearch =
       item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.reporter_name.toLowerCase().includes(searchTerm.toLowerCase());
+      item.description.toLowerCase().includes(searchTerm.toLowerCase());
 
     const matchesCampus =
       campusFilter === "All Campuses" || item.campus === campusFilter;
 
     const matchesCategory =
-      categoryFilter === "All Categories" ||
-      item.category === categoryFilter;
+      categoryFilter === "All Categories" || item.category === categoryFilter;
 
     return matchesSearch && matchesCampus && matchesCategory;
   });
 
-  /* ============================================================
-   * UI
-   * ============================================================ */
-
+  // LOADING UI
   if (loading) {
     return (
       <div className="text-center p-6 text-ubBlue dark:text-ubGold text-lg animate-pulse">
@@ -113,6 +113,7 @@ export default function ItemsPage() {
     );
   }
 
+  // NO ITEMS UI
   if (filteredItems.length === 0) {
     return (
       <div className="text-center p-10 text-gray-500 dark:text-gray-400 text-lg">
@@ -131,7 +132,7 @@ export default function ItemsPage() {
       <div className="flex flex-col md:flex-row justify-center gap-4 mb-8">
         <input
           type="text"
-          placeholder="Search by name, description, or reporter..."
+          placeholder="Search by name or description..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           className="border border-ubBlue dark:border-ubGold bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 p-2 rounded-lg w-full md:w-1/3"
