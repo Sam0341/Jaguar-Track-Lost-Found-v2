@@ -20,106 +20,97 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
   const [someoneElsePending, setSomeoneElsePending] = useState(false);
 
   const router = useRouter();
-
   const BUCKET = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/item-photos`;
 
   /* -----------------------------------------------------------
-   * LOAD ITEM + USER SESSION
+   * LOAD ITEM + USER
    * ----------------------------------------------------------- */
   useEffect(() => {
     async function load() {
-      /* -------- LOAD USER SESSION -------- */
+      /* USER SESSION */
       const { data: sessionData } = await supabase.auth.getSession();
       const session = sessionData?.session;
+
       setUser(session?.user || null);
 
       if (session?.user?.user_metadata?.role === "admin") {
         setIsAdmin(true);
       }
 
-      /* -------- LOAD ITEM (INCLUDING NEW DROPOFF LOCATION) -------- */
+      /* ITEM DATA */
       const { data, error } = await supabase
         .from("items")
         .select(
           `
-            id,
-            name,
-            description,
-            location,
-            dropoff_location,
-            image,
-            status,
-            reported_at,
-            campus_id,
-            category_id,
-            reported_by
-          `
+          id,
+          name,
+          description,
+          location,
+          dropoff_location,
+          image,
+          status,
+          reported_at,
+          campus_id,
+          category_id,
+          reported_by
+        `
         )
         .eq("id", params.id)
         .maybeSingle();
 
-      if (error) {
-        console.error("❌ Item fetch error:", error);
-        return;
+      if (error || !data) return;
+
+      /* CAMPUS */
+      let campusName = "Unknown Campus";
+      if (data.campus_id) {
+        const { data: campus } = await supabase
+          .from("campuses")
+          .select("name")
+          .eq("id", data.campus_id)
+          .maybeSingle();
+        if (campus) campusName = campus.name;
       }
 
-      if (data) {
-        /* ---------- LOAD CAMPUS NAME ---------- */
-        let campusName = "Unknown Campus";
-        if (data.campus_id) {
-          const { data: campus } = await supabase
-            .from("campuses")
-            .select("name")
-            .eq("id", data.campus_id)
-            .maybeSingle();
-          if (campus) campusName = campus.name;
-        }
-
-        /* ---------- LOAD CATEGORY NAME ---------- */
-        let categoryName = "Other";
-        if (data.category_id) {
-          const { data: category } = await supabase
-            .from("categories")
-            .select("name")
-            .eq("id", data.category_id)
-            .maybeSingle();
-          if (category) categoryName = category.name;
-        }
-
-        /* ---------- LOAD REPORTER PROFILE ---------- */
-        let reporterName = "Unknown";
-        let reporterEmail = "";
-
-        if (data.reported_by) {
-          const { data: profile } = await supabase
-            .from("profiles")
-            .select("full_name, email")
-            .eq("id", data.reported_by)
-            .maybeSingle();
-
-          if (profile) {
-            reporterName = profile.full_name || "Unknown";
-            reporterEmail = profile.email || "";
-          }
-        }
-
-        setItem({
-          ...data,
-          campus: campusName,
-          category: categoryName,
-          reporter_name: reporterName,
-          reporter_email: reporterEmail,
-          image_url: data.image
-            ? data.image.startsWith("http")
-              ? data.image
-              : `${BUCKET}/${data.image}`
-            : null,
-        });
+      /* CATEGORY */
+      let categoryName = "Other";
+      if (data.category_id) {
+        const { data: cat } = await supabase
+          .from("categories")
+          .select("name")
+          .eq("id", data.category_id)
+          .maybeSingle();
+        if (cat) categoryName = cat.name;
       }
 
-      /* -----------------------------------------------------------
-       * CHECK USER CLAIM STATUS
-       * ----------------------------------------------------------- */
+      /* REPORTER PROFILE */
+      let reporterName = "Unknown";
+      let reporterEmail = "";
+
+      if (data.reported_by) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("full_name, email")
+          .eq("id", data.reported_by)
+          .maybeSingle();
+
+        if (profile) {
+          reporterName = profile.full_name || "Unknown";
+          reporterEmail = profile.email || "";
+        }
+      }
+
+      setItem({
+        ...data,
+        campus: campusName,
+        category: categoryName,
+        reporter_name: reporterName,
+        reporter_email: reporterEmail,
+        image_url: data.image
+          ? `${BUCKET}/${data.image}`
+          : "https://placehold.co/600x400?text=No+Image",
+      });
+
+      /* CLAIM STATUS FOR USER */
       if (session?.user) {
         const { data: myClaim } = await supabase
           .from("claims")
@@ -134,19 +125,15 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
         }
       }
 
-      /* -----------------------------------------------------------
-       * CHECK IF SOMEONE ELSE HAS A PENDING CLAIM
-       * ----------------------------------------------------------- */
-      const { data: pendingCheck } = await supabase
+      /* CHECK IF SOMEONE ELSE IS PENDING */
+      const { data: pending } = await supabase
         .from("claims")
         .select("id, claimed_by, status")
         .eq("item_id", params.id)
         .eq("status", "pending");
 
-      if (Array.isArray(pendingCheck) && pendingCheck.length > 0) {
-        const pending = pendingCheck[0];
-
-        if (!session?.user || pending.claimed_by !== session.user.id) {
+      if (pending && pending.length > 0) {
+        if (!session?.user || pending[0].claimed_by !== session.user.id) {
           setSomeoneElsePending(true);
         }
       }
@@ -155,9 +142,9 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
     load();
   }, [params.id]);
 
-  /* -----------------------------------------------------------
-   * DATE FORMATTER
-   * ----------------------------------------------------------- */
+  /* ------------------------------------------
+   * DATE FORMAT
+   * ------------------------------------------ */
   const formatDate = (ts: string) =>
     new Date(ts).toLocaleString("en-US", {
       weekday: "short",
@@ -168,9 +155,9 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
       minute: "2-digit",
     });
 
-  /* -----------------------------------------------------------
+  /* ------------------------------------------
    * SUBMIT CLAIM
-   * ----------------------------------------------------------- */
+   * ------------------------------------------ */
   const submitClaim = async (e: any) => {
     e.preventDefault();
     if (!user) return router.push("/login");
@@ -195,16 +182,13 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
 
     if (result.success) {
       setClaimStatus("pending");
-      setFeedback("✔ Claim submitted!");
       setShowClaimForm(false);
+      setFeedback("✔ Claim submitted!");
     } else {
       setFeedback(`❌ ${result.error || "Failed to submit claim."}`);
     }
   };
 
-  /* -----------------------------------------------------------
-   * UI RENDER
-   * ----------------------------------------------------------- */
   if (!item) {
     return (
       <div className="text-center mt-10 text-gray-500 dark:text-gray-300">
@@ -218,16 +202,18 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
   return (
     <div className="container mx-auto p-6 pb-20">
       <div className="grid md:grid-cols-2 gap-8">
-        {/* IMAGE */}
-        <div className="bg-gray-200 dark:bg-gray-800 rounded-xl overflow-hidden shadow">
+
+        {/* ---------------- IMAGE (fixed height) ---------------- */}
+        <div className="bg-gray-200 dark:bg-gray-800 rounded-xl overflow-hidden shadow h-[360px] flex items-center justify-center">
           <img
-            src={item.image_url || "https://placehold.co/600x400?text=No+Image"}
-            className="w-full h-[360px] object-cover"
+            src={item.image_url}
+            className="w-full h-full object-cover"
           />
         </div>
 
-        {/* DETAILS */}
+        {/* ---------------- DETAILS ---------------- */}
         <div className="bg-white dark:bg-gray-900 p-6 rounded-xl shadow border dark:border-gray-700">
+
           <h1 className="text-3xl font-bold dark:text-white mb-2">{item.name}</h1>
 
           <p className="text-gray-600 dark:text-gray-300 mb-3">{item.description}</p>
@@ -243,38 +229,29 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
 
           {/* REPORT INFO */}
           <div className="text-sm dark:text-gray-300 space-y-1 mb-6">
-            <p>
-              <strong>Reported by:</strong> {item.reporter_name}
-            </p>
-            {isAdmin && (
-              <p>
-                <strong>Email:</strong> {item.reporter_email}
-              </p>
-            )}
-            <p>
-              <strong>Reported at:</strong> {formatDate(item.reported_at)}
-            </p>
-            <p>
-              <strong>Location:</strong> {item.location}
-            </p>
+            <p><strong>Reported by:</strong> {item.reporter_name}</p>
 
-            {/* ⭐ ADMIN-ONLY DROPOFF LOCATION */}
+            {isAdmin && (
+              <p><strong>Email:</strong> {item.reporter_email}</p>
+            )}
+
+            <p><strong>Reported at:</strong> {formatDate(item.reported_at)}</p>
+            <p><strong>Location:</strong> {item.location}</p>
+
             {isAdmin && item.dropoff_location && (
-              <p>
-                <strong>Drop-off Location:</strong> {item.dropoff_location}
-              </p>
+              <p><strong>Drop-off Location:</strong> {item.dropoff_location}</p>
             )}
           </div>
 
-          {/* CLAIM MESSAGES */}
+          {/* CLAIM STATUS MESSAGES */}
           {itemClaimed && (
             <p className="text-red-500 font-medium mb-3">
-              ❌ This item has already been fully claimed.
+              ❌ This item has already been claimed.
             </p>
           )}
 
           {someoneElsePending && !claimStatus && !itemClaimed && (
-            <p className="text-yellow-500 font-medium mb-3">
+            <p className="text-yellow-400 font-medium mb-3">
               ⚠ Someone else is currently claiming this item.
             </p>
           )}
@@ -287,7 +264,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
 
           {claimStatus === "approved" && (
             <p className="text-green-500 font-medium mb-3">
-              ✔ Your claim has been approved!
+              ✔ Your claim was approved!
             </p>
           )}
 
@@ -311,6 +288,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
                 onChange={(e) => setClaimMessage(e.target.value)}
                 className="w-full p-3 rounded-lg border dark:bg-gray-800 dark:text-white"
               />
+
               <button
                 type="submit"
                 className="mt-3 w-full bg-green-700 text-white py-2 rounded-lg"
