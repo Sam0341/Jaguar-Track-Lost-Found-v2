@@ -21,12 +21,14 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
 
   const router = useRouter();
 
-  const BUCKET =
-    `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/item-photos`;
+  const BUCKET = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/item-photos`;
 
+  /* -----------------------------------------------------------
+   * LOAD ITEM + USER SESSION
+   * ----------------------------------------------------------- */
   useEffect(() => {
     async function load() {
-      // Load user session
+      /* -------- LOAD USER SESSION -------- */
       const { data: sessionData } = await supabase.auth.getSession();
       const session = sessionData?.session;
       setUser(session?.user || null);
@@ -35,42 +37,88 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
         setIsAdmin(true);
       }
 
-      // Load the item
+      /* -------- LOAD ITEM WITHOUT BROKEN RELATIONSHIPS -------- */
       const { data, error } = await supabase
         .from("items")
-        .select(`
-          id,
-          name,
-          description,
-          location,
-          image,
-          status,
-          reported_at,
-          campus:campus_id ( id, name ),
-          category:category_id ( id, name ),
-          reporter:user_id ( id, full_name, email )
-        `)
+        .select(
+          `
+            id,
+            name,
+            description,
+            location,
+            image,
+            status,
+            reported_at,
+            campus_id,
+            category_id,
+            reported_by
+          `
+        )
         .eq("id", params.id)
         .maybeSingle();
 
-      if (!error && data) {
-        const campusObj = Array.isArray(data.campus) ? data.campus[0] : data.campus;
-        const categoryObj = Array.isArray(data.category) ? data.category[0] : data.category;
-        const reporterObj = Array.isArray(data.reporter) ? data.reporter[0] : data.reporter;
+      if (error) {
+        console.error("❌ Item fetch error:", error);
+        return;
+      }
+
+      if (data) {
+        /* ---------- LOAD CAMPUS NAME ---------- */
+        let campusName = "Unknown Campus";
+        if (data.campus_id) {
+          const { data: campus } = await supabase
+            .from("campuses")
+            .select("name")
+            .eq("id", data.campus_id)
+            .maybeSingle();
+          if (campus) campusName = campus.name;
+        }
+
+        /* ---------- LOAD CATEGORY NAME ---------- */
+        let categoryName = "Other";
+        if (data.category_id) {
+          const { data: category } = await supabase
+            .from("categories")
+            .select("name")
+            .eq("id", data.category_id)
+            .maybeSingle();
+          if (category) categoryName = category.name;
+        }
+
+        /* ---------- LOAD REPORTER PROFILE ---------- */
+        let reporterName = "Unknown";
+        let reporterEmail = "";
+
+        if (data.reported_by) {
+          const { data: profile } = await supabase
+            .from("profiles")
+            .select("full_name, email")
+            .eq("id", data.reported_by)
+            .maybeSingle();
+
+          if (profile) {
+            reporterName = profile.full_name || "Unknown";
+            reporterEmail = profile.email || "";
+          }
+        }
 
         setItem({
           ...data,
-          campus: campusObj?.name || "Unknown Campus",
-          category: categoryObj?.name || "Other",
-          reporter_name: reporterObj?.full_name || "Unknown",
-          reporter_email: reporterObj?.email || "",
+          campus: campusName,
+          category: categoryName,
+          reporter_name: reporterName,
+          reporter_email: reporterEmail,
           image_url: data.image
-            ? (data.image.startsWith("http") ? data.image : `${BUCKET}/${data.image}`)
+            ? data.image.startsWith("http")
+              ? data.image
+              : `${BUCKET}/${data.image}`
             : null,
         });
       }
 
-      // Load user's claim (if any)
+      /* -----------------------------------------------------------
+       * CHECK USER CLAIM STATUS
+       * ----------------------------------------------------------- */
       if (session?.user) {
         const { data: myClaim } = await supabase
           .from("claims")
@@ -85,16 +133,19 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
         }
       }
 
-      // Check if ANY pending claim exists
+      /* -----------------------------------------------------------
+       * CHECK IF SOMEONE ELSE HAS A PENDING CLAIM
+       * ----------------------------------------------------------- */
       const { data: pendingCheck } = await supabase
         .from("claims")
-        .select("id, claimed_by")
+        .select("id, claimed_by, status")
         .eq("item_id", params.id)
         .eq("status", "pending");
 
-      if (pendingCheck && pendingCheck.length > 0) {
-        const pendingClaim = pendingCheck[0];
-        if (!session?.user || pendingClaim.claimed_by !== session.user.id) {
+      if (Array.isArray(pendingCheck) && pendingCheck.length > 0) {
+        const pending = pendingCheck[0];
+
+        if (!session?.user || pending.claimed_by !== session.user.id) {
           setSomeoneElsePending(true);
         }
       }
@@ -103,6 +154,9 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
     load();
   }, [params.id]);
 
+  /* -----------------------------------------------------------
+   * DATE FORMATTER
+   * ----------------------------------------------------------- */
   const formatDate = (ts: string) =>
     new Date(ts).toLocaleString("en-US", {
       weekday: "short",
@@ -113,6 +167,9 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
       minute: "2-digit",
     });
 
+  /* -----------------------------------------------------------
+   * SUBMIT CLAIM
+   * ----------------------------------------------------------- */
   const submitClaim = async (e: any) => {
     e.preventDefault();
     if (!user) return router.push("/login");
@@ -144,8 +201,15 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
     }
   };
 
+  /* -----------------------------------------------------------
+   * UI RENDER
+   * ----------------------------------------------------------- */
   if (!item) {
-    return <div className="text-center mt-10 text-gray-500">Loading item…</div>;
+    return (
+      <div className="text-center mt-10 text-gray-500 dark:text-gray-300">
+        Loading item…
+      </div>
+    );
   }
 
   const itemClaimed = item.status?.toLowerCase() === "claimed";
@@ -153,7 +217,6 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
   return (
     <div className="container mx-auto p-6 pb-20">
       <div className="grid md:grid-cols-2 gap-8">
-
         {/* IMAGE */}
         <div className="bg-gray-200 dark:bg-gray-800 rounded-xl overflow-hidden shadow">
           <img
@@ -163,16 +226,14 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
         </div>
 
         {/* DETAILS */}
-        <div className="bg-white dark:bg-gray-900 p-6 rounded-xl shadow border border-gray-200 dark:border-gray-700">
-
-          <h1 className="text-3xl font-bold dark:text-white mb-2">
-            {item.name}
-          </h1>
+        <div className="bg-white dark:bg-gray-900 p-6 rounded-xl shadow border dark:border-gray-700">
+          <h1 className="text-3xl font-bold dark:text-white mb-2">{item.name}</h1>
 
           <p className="text-gray-600 dark:text-gray-300 mb-3">
             {item.description}
           </p>
 
+          {/* TAGS */}
           <div className="flex flex-wrap gap-2 mb-5">
             <span className="badge bg-gray-700 text-white">{item.category}</span>
             <span className="badge bg-blue-700 text-white">{item.campus}</span>
@@ -181,15 +242,25 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
             </span>
           </div>
 
+          {/* REPORT INFO */}
           <div className="text-sm dark:text-gray-300 space-y-1 mb-6">
-            <p><strong>Reported by:</strong> {item.reporter_name}</p>
-            {isAdmin && <p><strong>Email:</strong> {item.reporter_email}</p>}
-            <p><strong>Reported at:</strong> {formatDate(item.reported_at)}</p>
-            <p><strong>Location:</strong> {item.location}</p>
+            <p>
+              <strong>Reported by:</strong> {item.reporter_name}
+            </p>
+            {isAdmin && (
+              <p>
+                <strong>Email:</strong> {item.reporter_email}
+              </p>
+            )}
+            <p>
+              <strong>Reported at:</strong> {formatDate(item.reported_at)}
+            </p>
+            <p>
+              <strong>Location:</strong> {item.location}
+            </p>
           </div>
 
-          {/* CLAIM LOGIC */}
-
+          {/* CLAIM MESSAGES */}
           {itemClaimed && (
             <p className="text-red-500 font-medium mb-3">
               ❌ This item has already been fully claimed.
@@ -198,7 +269,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
 
           {someoneElsePending && !claimStatus && !itemClaimed && (
             <p className="text-yellow-500 font-medium mb-3">
-              ⚠️ Someone else is currently claiming this item.
+              ⚠ Someone else is currently claiming this item.
             </p>
           )}
 
@@ -214,6 +285,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
             </p>
           )}
 
+          {/* CLAIM BUTTON */}
           {!claimStatus && !itemClaimed && !someoneElsePending && (
             <button
               onClick={() => setShowClaimForm(!showClaimForm)}
@@ -223,6 +295,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
             </button>
           )}
 
+          {/* CLAIM FORM */}
           {showClaimForm && (
             <form onSubmit={submitClaim} className="mt-4">
               <textarea
@@ -243,7 +316,8 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
 
           {feedback && <p className="mt-3 text-center">{feedback}</p>}
 
-          {claimStatus === null && claimId && (
+          {/* CHAT BUTTON */}
+          {(claimStatus === null || claimStatus === "rejected") && claimId && (
             <Link
               href={`/user/chat/${claimId}`}
               className="mt-4 block text-center bg-ubGold py-2 rounded-lg font-bold"
