@@ -18,7 +18,7 @@ export default function ItemsPage() {
 
   const router = useRouter();
 
-  // Load logged-in user
+  // 🔐 Check login
   useEffect(() => {
     async function checkAuth() {
       const { data: { session } } = await supabase.auth.getSession();
@@ -27,7 +27,7 @@ export default function ItemsPage() {
     checkAuth();
   }, []);
 
-  // Fetch Items with correct relationship
+  // 📦 Fetch Items + Category + Campus
   useEffect(() => {
     async function fetchItems() {
       try {
@@ -42,8 +42,7 @@ export default function ItemsPage() {
             reported_at,
             location,
             campus:campus_id ( id, name ),
-            category:category_id ( id, name ),
-            reporter:user_id ( full_name, email )
+            category:category_id ( id, name )
           `)
           .order("reported_at", { ascending: false });
 
@@ -56,18 +55,27 @@ export default function ItemsPage() {
           `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/item-photos`;
 
         const mapped =
-          data?.map((item: any) => ({
-            ...item,
-            campus: item.campus?.name || "Unknown Campus",
-            category: item.category?.name || "Other",
-            reporter_name: item.reporter?.full_name || "Unknown",
-            reporter_email: item.reporter?.email || "",
-            image_url: item.image
-              ? item.image.startsWith("http")
-                ? item.image
-                : `${BUCKET}/${item.image}`
-              : null,
-          })) || [];
+          data?.map((item: any) => {
+            const campusObj = Array.isArray(item.campus)
+              ? item.campus[0]
+              : item.campus;
+
+            const categoryObj = Array.isArray(item.category)
+              ? item.category[0]
+              : item.category;
+
+            return {
+              ...item,
+              campus: campusObj?.name || "Unknown Campus",
+              category: categoryObj?.name || "Other",
+              description: item.description || "",
+              image_url: item.image
+                ? item.image.startsWith("http")
+                  ? item.image
+                  : `${BUCKET}/${item.image}`
+                : null,
+            };
+          }) || [];
 
         setItems(mapped);
       } catch (err) {
@@ -80,10 +88,11 @@ export default function ItemsPage() {
     fetchItems();
   }, []);
 
+  // 🔎 FILTERING
   const filteredItems = items.filter((item) => {
     const matchesSearch =
-      item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.description.toLowerCase().includes(searchTerm.toLowerCase());
+      item.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      item.description?.toLowerCase().includes(searchTerm.toLowerCase());
 
     const matchesCampus =
       campusFilter === "All Campuses" || item.campus === campusFilter;
@@ -94,6 +103,7 @@ export default function ItemsPage() {
     return matchesSearch && matchesCampus && matchesCategory;
   });
 
+  // LOADING UI
   if (loading) {
     return (
       <div className="text-center p-6 text-ubBlue dark:text-ubGold text-lg animate-pulse">
@@ -102,6 +112,7 @@ export default function ItemsPage() {
     );
   }
 
+  // NO ITEMS UI
   if (filteredItems.length === 0) {
     return (
       <div className="text-center p-10 text-gray-500 dark:text-gray-400 text-lg">
@@ -116,7 +127,7 @@ export default function ItemsPage() {
         Lost & Found Items
       </h1>
 
-      {/* FILTERS */}
+      {/* 🔍 FILTER BAR */}
       <div className="flex flex-col md:flex-row justify-center gap-4 mb-8">
         <input
           type="text"
@@ -126,6 +137,7 @@ export default function ItemsPage() {
           className="border border-ubBlue dark:border-ubGold bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 p-2 rounded-lg w-full md:w-1/3"
         />
 
+        {/* Category Filter */}
         <select
           value={categoryFilter}
           onChange={(e) => setCategoryFilter(e.target.value)}
@@ -137,6 +149,7 @@ export default function ItemsPage() {
           ))}
         </select>
 
+        {/* Campus Filter */}
         <select
           value={campusFilter}
           onChange={(e) => setCampusFilter(e.target.value)}
@@ -149,13 +162,14 @@ export default function ItemsPage() {
         </select>
       </div>
 
-      {/* ITEMS GRID */}
+      {/* 🧾 ITEMS GRID */}
       <div className="grid sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
         {filteredItems.map((item) => (
           <div
             key={item.id}
             className="bg-white dark:bg-gray-900 shadow rounded-2xl border dark:border-gray-700 hover:shadow-lg hover:border-ubGold transition overflow-hidden group"
           >
+            {/* 📷 IMAGE */}
             <div className="h-48 bg-gray-200 dark:bg-gray-800 overflow-hidden">
               <img
                 src={
@@ -171,6 +185,7 @@ export default function ItemsPage() {
               />
             </div>
 
+            {/* 📄 TEXT */}
             <div className="p-4">
               <h2 className="font-bold text-lg text-gray-900 dark:text-gray-100">
                 {item.name}
@@ -180,6 +195,7 @@ export default function ItemsPage() {
                 {item.description}
               </p>
 
+              {/* TAGS */}
               <div className="flex flex-wrap gap-2 mt-3">
                 <span
                   className={`text-xs px-2 py-1 rounded-full ${
@@ -202,6 +218,7 @@ export default function ItemsPage() {
                 </span>
               </div>
 
+              {/* DETAILS BUTTON */}
               <Link href={`/items/${item.id}`}>
                 <button className="mt-4 w-full bg-ubBlue dark:bg-ubGold text-white dark:text-gray-900 py-2 rounded-lg hover:opacity-90 transition font-semibold">
                   View Details

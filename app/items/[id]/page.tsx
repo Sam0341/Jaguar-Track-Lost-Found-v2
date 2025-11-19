@@ -16,6 +16,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
   const [claimMessage, setClaimMessage] = useState("");
   const [showClaimForm, setShowClaimForm] = useState(false);
   const [feedback, setFeedback] = useState("");
+
   const [someoneElsePending, setSomeoneElsePending] = useState(false);
 
   const router = useRouter();
@@ -23,6 +24,10 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
   const BUCKET =
     `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/item-photos`;
 
+  /* ===========================================================
+   * LOAD ITEM + USER + CLAIM STATES
+   * ===========================================================
+   */
   useEffect(() => {
     async function load() {
       // Load user
@@ -34,7 +39,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
         setIsAdmin(true);
       }
 
-      // LOAD ITEM — FIXED (NO MORE reporter join)
+      // Load item
       const { data, error } = await supabase
         .from("items")
         .select(`
@@ -46,7 +51,8 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
           status,
           reported_at,
           campus:campus_id ( id, name ),
-          category:category_id ( id, name )
+          category:category_id ( id, name ),
+          reporter:reported_by ( id, full_name, email )
         `)
         .eq("id", params.id)
         .maybeSingle();
@@ -54,18 +60,24 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
       if (!error && data) {
         const campusObj = Array.isArray(data.campus) ? data.campus[0] : data.campus;
         const categoryObj = Array.isArray(data.category) ? data.category[0] : data.category;
+        const reporterObj = Array.isArray(data.reporter) ? data.reporter[0] : data.reporter;
 
         setItem({
           ...data,
           campus: campusObj?.name || "Unknown Campus",
           category: categoryObj?.name || "Other",
+          reporter_name: reporterObj?.full_name || "Unknown",
+          reporter_email: reporterObj?.email || "",
           image_url: data.image
             ? (data.image.startsWith("http") ? data.image : `${BUCKET}/${data.image}`)
             : null,
         });
       }
 
-      // Load user claim
+      /* ------------------------------------------------------------------
+       * 1. Load current user's claim (if any)
+       * ------------------------------------------------------------------
+       */
       if (session?.user) {
         const { data: myClaim } = await supabase
           .from("claims")
@@ -80,15 +92,20 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
         }
       }
 
-      // Check pending claims
+      /* ------------------------------------------------------------------
+       * 2. Check if ANY pending claim exists for this item
+       * ------------------------------------------------------------------
+       */
       const { data: pendingCheck } = await supabase
         .from("claims")
         .select("id, claimed_by")
         .eq("item_id", params.id)
         .eq("status", "pending");
 
-      if (pendingCheck?.length) {
-        if (!session?.user || pendingCheck[0].claimed_by !== session.user.id) {
+      if (pendingCheck && pendingCheck.length > 0) {
+        const pendingClaim = pendingCheck[0];
+
+        if (!session?.user || pendingClaim.claimed_by !== session.user.id) {
           setSomeoneElsePending(true);
         }
       }
@@ -97,6 +114,10 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
     load();
   }, [params.id]);
 
+  /* ===========================================================
+   * DATE FORMATTER
+   * ===========================================================
+   */
   const formatDate = (ts: string) =>
     new Date(ts).toLocaleString("en-US", {
       weekday: "short",
@@ -107,6 +128,10 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
       minute: "2-digit",
     });
 
+  /* ===========================================================
+   * SUBMIT CLAIM
+   * ===========================================================
+   */
   const submitClaim = async (e: any) => {
     e.preventDefault();
     if (!user) return router.push("/login");
@@ -144,6 +169,10 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
 
   const itemClaimed = item.status?.toLowerCase() === "claimed";
 
+  /* ===========================================================
+   * UI RENDER
+   * ===========================================================
+   */
   return (
     <div className="container mx-auto p-6 pb-20">
       <div className="grid md:grid-cols-2 gap-8">
@@ -167,6 +196,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
             {item.description}
           </p>
 
+          {/* TAGS */}
           <div className="flex flex-wrap gap-2 mb-5">
             <span className="badge bg-gray-700 text-white">{item.category}</span>
             <span className="badge bg-blue-700 text-white">{item.campus}</span>
@@ -175,23 +205,34 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
             </span>
           </div>
 
+          {/* REPORT INFO */}
           <div className="text-sm dark:text-gray-300 space-y-1 mb-6">
+            <p><strong>Reported by:</strong> {item.reporter_name}</p>
+            {isAdmin && <p><strong>Email:</strong> {item.reporter_email}</p>}
             <p><strong>Reported at:</strong> {formatDate(item.reported_at)}</p>
             <p><strong>Location:</strong> {item.location}</p>
           </div>
 
+          {/* ===========================================================
+           * CLAIM LOGIC & UI
+           * ===========================================================
+           */}
+
+          {/* ITEM CLAIMED (final) */}
           {itemClaimed && (
             <p className="text-red-500 font-medium mb-3">
               ❌ This item has already been fully claimed.
             </p>
           )}
 
+          {/* SOMEONE ELSE HAS A PENDING CLAIM */}
           {someoneElsePending && !claimStatus && !itemClaimed && (
             <p className="text-yellow-500 font-medium mb-3">
               ⚠️ Someone else is currently claiming this item.
             </p>
           )}
 
+          {/* YOUR CLAIM STATUS */}
           {claimStatus === "pending" && (
             <p className="text-yellow-400 font-medium mb-3">
               🕒 Your claim is pending admin approval.
@@ -204,6 +245,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
             </p>
           )}
 
+          {/* CLAIM BUTTON (only if allowed) */}
           {!claimStatus && !itemClaimed && !someoneElsePending && (
             <button
               onClick={() => setShowClaimForm(!showClaimForm)}
@@ -213,6 +255,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
             </button>
           )}
 
+          {/* CLAIM FORM */}
           {showClaimForm && (
             <form onSubmit={submitClaim} className="mt-4">
               <textarea
@@ -233,6 +276,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
 
           {feedback && <p className="mt-3 text-center">{feedback}</p>}
 
+          {/* ❌ CHAT REMOVED FOR PENDING + APPROVED */}
           {(claimStatus === null || claimStatus === "rejected") && claimId && (
             <Link
               href={`/user/chat/${claimId}`}
