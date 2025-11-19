@@ -51,19 +51,31 @@ export default function ItemsPage() {
           return;
         }
 
-        const BUCKET = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/item-photos`;
+        const BUCKET =
+          `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/item-photos`;
 
         const mapped =
-          data?.map((item: any) => ({
-            ...item,
-            campus: item.campus?.name || "Unknown Campus",
-            category: item.category?.name || "Other",
-            image_url: item.image
-              ? item.image.startsWith("http")
-                ? item.image
-                : `${BUCKET}/${item.image}`
-              : null,
-          })) || [];
+          data?.map((item: any) => {
+            const campusObj = Array.isArray(item.campus)
+              ? item.campus[0]
+              : item.campus;
+
+            const categoryObj = Array.isArray(item.category)
+              ? item.category[0]
+              : item.category;
+
+            return {
+              ...item,
+              campus: campusObj?.name || "Unknown Campus",
+              category: categoryObj?.name || "Other",
+              description: item.description || "",
+              image_url: item.image
+                ? item.image.startsWith("http")
+                  ? item.image
+                  : `${BUCKET}/${item.image}`
+                : null,
+            };
+          }) || [];
 
         setItems(mapped);
       } catch (err) {
@@ -79,8 +91,8 @@ export default function ItemsPage() {
   // 🔎 FILTERING
   const filteredItems = items.filter((item) => {
     const matchesSearch =
-      item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.description.toLowerCase().includes(searchTerm.toLowerCase());
+      item.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      item.description?.toLowerCase().includes(searchTerm.toLowerCase());
 
     const matchesCampus =
       campusFilter === "All Campuses" || item.campus === campusFilter;
@@ -206,16 +218,16 @@ export default function ItemsPage() {
                 </span>
               </div>
 
-                            {/* DETAILS BUTTON */}
-                            <Link href={`/items/${item.id}`}>
-                              <button className="mt-4 w-full bg-ubBlue dark:bg-ubGold text-white dark:text-gray-900 py-2 rounded-lg hover:opacity-90 transition font-semibold">
-                                View Details
-                              </button>
-                            </Link>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              }
+              {/* DETAILS BUTTON */}
+              <Link href={`/items/${item.id}`}>
+                <button className="mt-4 w-full bg-ubBlue dark:bg-ubGold text-white dark:text-gray-900 py-2 rounded-lg hover:opacity-90 transition font-semibold">
+                  View Details
+                </button>
+              </Link>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
