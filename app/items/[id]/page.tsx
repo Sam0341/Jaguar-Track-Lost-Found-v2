@@ -19,6 +19,8 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
 
   const [someoneElsePending, setSomeoneElsePending] = useState(false);
 
+  const [previewOpen, setPreviewOpen] = useState(false); // ⭐ NEW
+
   const router = useRouter();
   const BUCKET = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/item-photos`;
 
@@ -32,10 +34,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
       const session = sessionData?.session;
 
       setUser(session?.user || null);
-
-      if (session?.user?.user_metadata?.role === "admin") {
-        setIsAdmin(true);
-      }
+      if (session?.user?.user_metadata?.role === "admin") setIsAdmin(true);
 
       /* ITEM DATA */
       const { data, error } = await supabase
@@ -82,7 +81,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
         if (cat) categoryName = cat.name;
       }
 
-      /* REPORTER PROFILE */
+      /* REPORTER */
       let reporterName = "Unknown";
       let reporterEmail = "";
 
@@ -92,7 +91,6 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
           .select("full_name, email")
           .eq("id", data.reported_by)
           .maybeSingle();
-
         if (profile) {
           reporterName = profile.full_name || "Unknown";
           reporterEmail = profile.email || "";
@@ -110,7 +108,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
           : "https://placehold.co/600x400?text=No+Image",
       });
 
-      /* CLAIM STATUS FOR USER */
+      /* CLAIM STATUS */
       if (session?.user) {
         const { data: myClaim } = await supabase
           .from("claims")
@@ -125,7 +123,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
         }
       }
 
-      /* CHECK IF SOMEONE ELSE IS PENDING */
+      /* SOMEONE ELSE PENDING */
       const { data: pending } = await supabase
         .from("claims")
         .select("id, claimed_by, status")
@@ -133,13 +131,20 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
         .eq("status", "pending");
 
       if (pending && pending.length > 0) {
-        if (!session?.user || pending[0].claimed_by !== session.user.id) {
+        if (!session?.user || pending[0].claimed_by !== session?.user?.id) {
           setSomeoneElsePending(true);
         }
       }
     }
 
     load();
+
+    // Close preview with ESC
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPreviewOpen(false);
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
   }, [params.id]);
 
   /* ------------------------------------------
@@ -200,41 +205,50 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
   const itemClaimed = item.status?.toLowerCase() === "claimed";
 
   return (
-    <div className="container mx-auto p-6 pb-20">
+    <div className="container mx-auto p-6 pb-20 relative">
+
+      {/* FULLSCREEN IMAGE PREVIEW ⭐ */}
+      {previewOpen && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center z-50 animate-fadeIn"
+          onClick={() => setPreviewOpen(false)}
+        >
+          <img
+            src={item.image_url}
+            className="max-w-[95%] max-h-[95%] rounded-lg shadow-xl"
+          />
+        </div>
+      )}
+
       <div className="grid md:grid-cols-2 gap-8">
 
-        {/* ---------------- IMAGE (fixed height) ---------------- */}
-        <div className="bg-gray-200 dark:bg-gray-800 rounded-xl overflow-hidden shadow h-[360px] flex items-center justify-center">
+        {/* IMAGE */}
+        <div className="bg-gray-200 dark:bg-gray-800 rounded-xl overflow-hidden shadow h-[360px] flex items-center justify-center cursor-pointer"
+             onClick={() => setPreviewOpen(true)}>
+
           <img
             src={item.image_url}
             className="w-full h-full object-cover"
           />
         </div>
 
-        {/* ---------------- DETAILS ---------------- */}
+        {/* DETAILS */}
         <div className="bg-white dark:bg-gray-900 p-6 rounded-xl shadow border dark:border-gray-700">
 
           <h1 className="text-3xl font-bold dark:text-white mb-2">{item.name}</h1>
-
           <p className="text-gray-600 dark:text-gray-300 mb-3">{item.description}</p>
 
           {/* TAGS */}
           <div className="flex flex-wrap gap-2 mb-5">
             <span className="badge bg-gray-700 text-white">{item.category}</span>
             <span className="badge bg-blue-700 text-white">{item.campus}</span>
-            <span className="badge bg-yellow-500 text-black">
-              {item.status.toUpperCase()}
-            </span>
+            <span className="badge bg-yellow-500 text-black">{item.status.toUpperCase()}</span>
           </div>
 
           {/* REPORT INFO */}
           <div className="text-sm dark:text-gray-300 space-y-1 mb-6">
             <p><strong>Reported by:</strong> {item.reporter_name}</p>
-
-            {isAdmin && (
-              <p><strong>Email:</strong> {item.reporter_email}</p>
-            )}
-
+            {isAdmin && <p><strong>Email:</strong> {item.reporter_email}</p>}
             <p><strong>Reported at:</strong> {formatDate(item.reported_at)}</p>
             <p><strong>Location:</strong> {item.location}</p>
 
@@ -243,7 +257,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
             )}
           </div>
 
-          {/* CLAIM STATUS MESSAGES */}
+          {/* CLAIM STATUSES */}
           {itemClaimed && (
             <p className="text-red-500 font-medium mb-3">
               ❌ This item has already been claimed.
