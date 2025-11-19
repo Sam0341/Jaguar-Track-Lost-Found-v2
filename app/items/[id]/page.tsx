@@ -24,13 +24,9 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
   const BUCKET =
     `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/item-photos`;
 
-  /* ===========================================================
-   * LOAD ITEM + USER + CLAIM STATES
-   * ===========================================================
-   */
   useEffect(() => {
     async function load() {
-      // Load user
+      // Load user session
       const { data: sessionData } = await supabase.auth.getSession();
       const session = sessionData?.session;
       setUser(session?.user || null);
@@ -39,7 +35,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
         setIsAdmin(true);
       }
 
-      // Load item
+      // Load the item
       const { data, error } = await supabase
         .from("items")
         .select(`
@@ -52,7 +48,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
           reported_at,
           campus:campus_id ( id, name ),
           category:category_id ( id, name ),
-          reporter:reported_by ( id, full_name, email )
+          reporter:user_id ( id, full_name, email )
         `)
         .eq("id", params.id)
         .maybeSingle();
@@ -74,10 +70,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
         });
       }
 
-      /* ------------------------------------------------------------------
-       * 1. Load current user's claim (if any)
-       * ------------------------------------------------------------------
-       */
+      // Load user's claim (if any)
       if (session?.user) {
         const { data: myClaim } = await supabase
           .from("claims")
@@ -92,10 +85,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
         }
       }
 
-      /* ------------------------------------------------------------------
-       * 2. Check if ANY pending claim exists for this item
-       * ------------------------------------------------------------------
-       */
+      // Check if ANY pending claim exists
       const { data: pendingCheck } = await supabase
         .from("claims")
         .select("id, claimed_by")
@@ -104,7 +94,6 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
 
       if (pendingCheck && pendingCheck.length > 0) {
         const pendingClaim = pendingCheck[0];
-
         if (!session?.user || pendingClaim.claimed_by !== session.user.id) {
           setSomeoneElsePending(true);
         }
@@ -114,10 +103,6 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
     load();
   }, [params.id]);
 
-  /* ===========================================================
-   * DATE FORMATTER
-   * ===========================================================
-   */
   const formatDate = (ts: string) =>
     new Date(ts).toLocaleString("en-US", {
       weekday: "short",
@@ -128,10 +113,6 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
       minute: "2-digit",
     });
 
-  /* ===========================================================
-   * SUBMIT CLAIM
-   * ===========================================================
-   */
   const submitClaim = async (e: any) => {
     e.preventDefault();
     if (!user) return router.push("/login");
@@ -169,10 +150,6 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
 
   const itemClaimed = item.status?.toLowerCase() === "claimed";
 
-  /* ===========================================================
-   * UI RENDER
-   * ===========================================================
-   */
   return (
     <div className="container mx-auto p-6 pb-20">
       <div className="grid md:grid-cols-2 gap-8">
@@ -196,7 +173,6 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
             {item.description}
           </p>
 
-          {/* TAGS */}
           <div className="flex flex-wrap gap-2 mb-5">
             <span className="badge bg-gray-700 text-white">{item.category}</span>
             <span className="badge bg-blue-700 text-white">{item.campus}</span>
@@ -205,7 +181,6 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
             </span>
           </div>
 
-          {/* REPORT INFO */}
           <div className="text-sm dark:text-gray-300 space-y-1 mb-6">
             <p><strong>Reported by:</strong> {item.reporter_name}</p>
             {isAdmin && <p><strong>Email:</strong> {item.reporter_email}</p>}
@@ -213,26 +188,20 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
             <p><strong>Location:</strong> {item.location}</p>
           </div>
 
-          {/* ===========================================================
-           * CLAIM LOGIC & UI
-           * ===========================================================
-           */}
+          {/* CLAIM LOGIC */}
 
-          {/* ITEM CLAIMED (final) */}
           {itemClaimed && (
             <p className="text-red-500 font-medium mb-3">
               ❌ This item has already been fully claimed.
             </p>
           )}
 
-          {/* SOMEONE ELSE HAS A PENDING CLAIM */}
           {someoneElsePending && !claimStatus && !itemClaimed && (
             <p className="text-yellow-500 font-medium mb-3">
               ⚠️ Someone else is currently claiming this item.
             </p>
           )}
 
-          {/* YOUR CLAIM STATUS */}
           {claimStatus === "pending" && (
             <p className="text-yellow-400 font-medium mb-3">
               🕒 Your claim is pending admin approval.
@@ -245,7 +214,6 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
             </p>
           )}
 
-          {/* CLAIM BUTTON (only if allowed) */}
           {!claimStatus && !itemClaimed && !someoneElsePending && (
             <button
               onClick={() => setShowClaimForm(!showClaimForm)}
@@ -255,7 +223,6 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
             </button>
           )}
 
-          {/* CLAIM FORM */}
           {showClaimForm && (
             <form onSubmit={submitClaim} className="mt-4">
               <textarea
@@ -276,8 +243,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
 
           {feedback && <p className="mt-3 text-center">{feedback}</p>}
 
-          {/* ❌ CHAT REMOVED FOR PENDING + APPROVED */}
-          {(claimStatus === null || claimStatus === "rejected") && claimId && (
+          {claimStatus === null && claimId && (
             <Link
               href={`/user/chat/${claimId}`}
               className="mt-4 block text-center bg-ubGold py-2 rounded-lg font-bold"
