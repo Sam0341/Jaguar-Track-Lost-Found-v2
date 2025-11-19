@@ -37,7 +37,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
         setIsAdmin(true);
       }
 
-      /* -------- LOAD ITEM WITHOUT BROKEN RELATIONSHIPS -------- */
+      /* -------- LOAD ITEM (INCLUDING NEW DROPOFF LOCATION) -------- */
       const { data, error } = await supabase
         .from("items")
         .select(
@@ -46,6 +46,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
             name,
             description,
             location,
+            dropoff_location,
             image,
             status,
             reported_at,
@@ -229,9 +230,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
         <div className="bg-white dark:bg-gray-900 p-6 rounded-xl shadow border dark:border-gray-700">
           <h1 className="text-3xl font-bold dark:text-white mb-2">{item.name}</h1>
 
-          <p className="text-gray-600 dark:text-gray-300 mb-3">
-            {item.description}
-          </p>
+          <p className="text-gray-600 dark:text-gray-300 mb-3">{item.description}</p>
 
           {/* TAGS */}
           <div className="flex flex-wrap gap-2 mb-5">
@@ -258,6 +257,13 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
             <p>
               <strong>Location:</strong> {item.location}
             </p>
+
+            {/* ⭐ ADMIN-ONLY DROPOFF LOCATION */}
+            {isAdmin && item.dropoff_location && (
+              <p>
+                <strong>Drop-off Location:</strong> {item.dropoff_location}
+              </p>
+            )}
           </div>
 
           {/* CLAIM MESSAGES */}

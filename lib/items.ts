@@ -14,6 +14,7 @@ export type Item = {
 
   reporter_name?: string;
   reporter_email?: string;
+  dropoff_location?: string;
   reported_at?: string;
 };
 
@@ -28,13 +29,14 @@ export async function getAllItems() {
       name,
       description,
       location,
+      dropoff_location,
       status,
       image,
       reported_at,
       reporter_name,
       reporter_email,
-      campus:campus_id ( id, name ),
-      category:category_id ( id, name )
+      campus:campus_id ( name ),
+      category:category_id ( name )
     `)
     .order("reported_at", { ascending: false });
 
@@ -48,8 +50,8 @@ export async function getAllItems() {
 
   return (data || []).map((item: any) => ({
     ...item,
-    campus: item.campus?.[0]?.name || "Unknown Campus",
-    category: item.category?.[0]?.name || "Other",
+    campus: item.campus?.name || "Unknown Campus",
+    category: item.category?.name || "Other",
     image_url: item.image
       ? `${PUBLIC_BUCKET}/${item.image}`
       : "https://placehold.co/600x400?text=No+Image",
@@ -67,13 +69,14 @@ export async function getItemById(id: string) {
       name,
       description,
       location,
+      dropoff_location,
       status,
       image,
       reported_at,
       reporter_name,
       reporter_email,
-      campus:campus_id ( id, name ),
-      category:category_id ( id, name )
+      campus:campus_id ( name ),
+      category:category_id ( name )
     `)
     .eq("id", id)
     .single();
@@ -87,17 +90,19 @@ export async function getItemById(id: string) {
     `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/item-photos`;
 
   return {
-    ...data,
-    campus: data.campus?.[0]?.name || "Unknown Campus",
-    category: data.category?.[0]?.name || "Other",
-    image_url: data.image
-      ? `${PUBLIC_BUCKET}/${data.image}`
-      : "https://placehold.co/600x400?text=No+Image",
-  };
+  ...data,
+
+  campus: data.campus?.[0]?.name || "Unknown Campus",
+  category: data.category?.[0]?.name || "Other",
+
+  image_url: data.image
+    ? `${PUBLIC_BUCKET}/${data.image}`
+    : "https://placehold.co/600x400?text=No+Image",
+};
 }
 
 // -------------------------------------------------------
-// ADD A NEW ITEM (FIXED VERSION)
+// ADD A NEW ITEM (with dropoff location)
 // -------------------------------------------------------
 export async function addItem({
   name,
@@ -106,6 +111,7 @@ export async function addItem({
   status,
   category,
   campus,
+  dropoffLocation,
   userId,
   imageFile,
   reporterName,
@@ -115,8 +121,9 @@ export async function addItem({
   description: string;
   location: string;
   status: string;
-  category: string; // category_id
-  campus: string; // campus_id
+  category: string;
+  campus: string;
+  dropoffLocation?: string;
   userId: string;
   imageFile?: File | null;
   reporterName?: string;
@@ -125,9 +132,7 @@ export async function addItem({
   try {
     let imagePath: string | null = null;
 
-    // -----------------------
-    // Handle Image Upload
-    // -----------------------
+    // Upload image
     if (imageFile) {
       const fileName = `${Date.now()}-${imageFile.name}`;
       const { error: uploadError } = await supabase.storage
@@ -135,30 +140,27 @@ export async function addItem({
         .upload(fileName, imageFile);
 
       if (uploadError) throw uploadError;
+
       imagePath = fileName;
     }
 
-    // -----------------------
-    // Insert into Items Table
-    // -----------------------
+    // Insert item
     const { error } = await supabase.from("items").insert([
       {
         name,
         description,
         location,
+        dropoff_location: dropoffLocation || null,
         status,
         image: imagePath,
 
-        // ⭐ FIX — Save real user data
         reported_by: userId,
         reporter_name: reporterName,
         reporter_email: reporterEmail,
 
-        // Foreign keys
         category_id: category,
         campus_id: campus,
 
-        // Timestamp
         reported_at: new Date().toISOString(),
       },
     ]);

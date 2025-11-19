@@ -12,6 +12,8 @@ export default function ReportForm() {
 
   const [categoryId, setCategoryId] = useState("");
   const [campusId, setCampusId] = useState("");
+  const [dropoffLocation, setDropoffLocation] = useState("");
+
   const [categories, setCategories] = useState<any[]>([]);
   const [campuses, setCampuses] = useState<any[]>([]);
 
@@ -63,9 +65,7 @@ export default function ReportForm() {
       return;
     }
 
-    // ------------------------------------------
-    // ⭐ FIXED: Update the user's profile first
-    // ------------------------------------------
+    // ⭐ Update the profile with latest name + email
     await supabase
       .from("profiles")
       .update({
@@ -74,9 +74,7 @@ export default function ReportForm() {
       })
       .eq("id", auth.user.id);
 
-    // ------------------------------------------
-    // Then insert the item normally
-    // ------------------------------------------
+    // ⭐ Submit item
     const success = await addItem({
       name: itemName,
       description,
@@ -84,10 +82,12 @@ export default function ReportForm() {
       status,
       category: categoryId,
       campus: campusId,
+      dropoffLocation, // NEW
       userId: auth.user.id,
       reporterName,
       reporterEmail,
       imageFile: image,
+      
     });
 
     if (success) {
@@ -97,6 +97,7 @@ export default function ReportForm() {
       setLocation("");
       setCategoryId("");
       setCampusId("");
+      setDropoffLocation("");
       setStatus("Lost");
       setImage(null);
     } else {
@@ -168,11 +169,26 @@ export default function ReportForm() {
 
         <input
           className="input rounded-2xl col-span-1 md:col-span-2"
-          placeholder="Location"
+          placeholder="Location (Where you lost/found it)"
           value={location}
           onChange={(e) => setLocation(e.target.value)}
           required
         />
+
+        {/* ⭐ DROPOFF LOCATION (FOR FOUND ITEMS ONLY) */}
+        {status === "Found" && (
+          <select
+            className="input rounded-2xl col-span-1 md:col-span-2"
+            value={dropoffLocation}
+            onChange={(e) => setDropoffLocation(e.target.value)}
+          >
+            <option value="">Select Drop-off Location</option>
+            <option value="UB Security Office">UB Security Office</option>
+            <option value="Library Lost & Found Box">Library Lost & Found Box</option>
+            <option value="Jaguar U3 Office">Jaguar U3 Office</option>
+            <option value="Student Affairs Office">Student Affairs Office</option>
+          </select>
+        )}
 
         <input
           className="input rounded-2xl"
