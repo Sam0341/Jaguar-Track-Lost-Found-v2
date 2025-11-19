@@ -63,6 +63,20 @@ export default function ReportForm() {
       return;
     }
 
+    // ------------------------------------------
+    // ⭐ FIXED: Update the user's profile first
+    // ------------------------------------------
+    await supabase
+      .from("profiles")
+      .update({
+        full_name: reporterName,
+        email: reporterEmail,
+      })
+      .eq("id", auth.user.id);
+
+    // ------------------------------------------
+    // Then insert the item normally
+    // ------------------------------------------
     const success = await addItem({
       name: itemName,
       description,
@@ -103,7 +117,6 @@ export default function ReportForm() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
-        {/* Item Name */}
         <input
           className="input rounded-2xl"
           placeholder="Item Name"
@@ -112,7 +125,6 @@ export default function ReportForm() {
           required
         />
 
-        {/* Status */}
         <select
           className="input rounded-2xl"
           value={status}
@@ -122,7 +134,6 @@ export default function ReportForm() {
           <option>Found</option>
         </select>
 
-        {/* Category */}
         <select
           className="input rounded-2xl"
           value={categoryId}
@@ -135,7 +146,6 @@ export default function ReportForm() {
           ))}
         </select>
 
-        {/* Campus */}
         <select
           className="input rounded-2xl"
           value={campusId}
@@ -148,25 +158,22 @@ export default function ReportForm() {
           ))}
         </select>
 
-        {/* Description (full width) */}
         <textarea
           className="input rounded-2xl col-span-1 md:col-span-2 h-28"
-          placeholder="Description (include when/where it was lost or found)"
+          placeholder="Description"
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           required
         />
 
-        {/* Location (full width) */}
         <input
           className="input rounded-2xl col-span-1 md:col-span-2"
-          placeholder="Location (Library, Cafe, Lab, Bus Stop...)"
+          placeholder="Location"
           value={location}
           onChange={(e) => setLocation(e.target.value)}
           required
         />
 
-        {/* Name */}
         <input
           className="input rounded-2xl"
           placeholder="Your Name"
@@ -174,7 +181,6 @@ export default function ReportForm() {
           onChange={(e) => setReporterName(e.target.value)}
         />
 
-        {/* Email */}
         <input
           className="input rounded-2xl"
           placeholder="Your UB Email"
@@ -182,7 +188,6 @@ export default function ReportForm() {
           onChange={(e) => setReporterEmail(e.target.value)}
         />
 
-        {/* Hidden file input */}
         <input
           id="file-upload"
           type="file"
@@ -191,16 +196,13 @@ export default function ReportForm() {
           onChange={(e) => setImage(e.target.files?.[0] ?? null)}
         />
 
-        {/* Drag & Drop Upload */}
         <label
           htmlFor="file-upload"
           className="col-span-1 md:col-span-2 border-2 border-dashed border-gray-300 dark:border-gray-700 
           rounded-2xl p-6 flex flex-col items-center justify-center text-gray-600 dark:text-gray-300 
           cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 transition"
         >
-          <span className="text-sm">
-            Drag & drop an image here or click to upload
-          </span>
+          <span className="text-sm">Drag & drop an image here or click to upload</span>
 
           {image && (
             <span className="mt-2 text-xs opacity-70">
@@ -209,14 +211,13 @@ export default function ReportForm() {
           )}
         </label>
 
-        {/* Submit Button */}
         <div className="col-span-1 md:col-span-2 mt-4">
           <button
             type="submit"
             disabled={loading}
             className="w-full py-3 rounded-2xl font-semibold shadow-lg 
-              text-white bg-gradient-to-r from-blue-700 to-blue-500 
-              dark:from-ubGold dark:to-yellow-500 hover:opacity-90 transition"
+            text-white bg-gradient-to-r from-blue-700 to-blue-500 
+            dark:from-ubGold dark:to-yellow-500 hover:opacity-90 transition"
           >
             {loading ? "Submitting..." : "Submit Report"}
           </button>
