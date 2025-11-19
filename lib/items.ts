@@ -17,9 +17,9 @@ export type Item = {
   reported_at?: string;
 };
 
-// ----------------------------
+// -------------------------------------------------------
 // FETCH ALL ITEMS
-// ----------------------------
+// -------------------------------------------------------
 export async function getAllItems() {
   const { data, error } = await supabase
     .from("items")
@@ -56,9 +56,9 @@ export async function getAllItems() {
   }));
 }
 
-// ----------------------------
+// -------------------------------------------------------
 // FETCH ONE ITEM BY ID
-// ----------------------------
+// -------------------------------------------------------
 export async function getItemById(id: string) {
   const { data, error } = await supabase
     .from("items")
@@ -76,7 +76,7 @@ export async function getItemById(id: string) {
       category:category_id ( id, name )
     `)
     .eq("id", id)
-    .single(); // <== IMPORTANT!
+    .single();
 
   if (error) {
     console.error("❌ Error fetching item:", error.message);
@@ -96,9 +96,9 @@ export async function getItemById(id: string) {
   };
 }
 
-// ----------------------------
-// ADD A NEW ITEM
-// ----------------------------
+// -------------------------------------------------------
+// ADD A NEW ITEM (FIXED VERSION)
+// -------------------------------------------------------
 export async function addItem({
   name,
   description,
@@ -116,7 +116,7 @@ export async function addItem({
   location: string;
   status: string;
   category: string; // category_id
-  campus: string;   // campus_id
+  campus: string; // campus_id
   userId: string;
   imageFile?: File | null;
   reporterName?: string;
@@ -125,6 +125,9 @@ export async function addItem({
   try {
     let imagePath: string | null = null;
 
+    // -----------------------
+    // Handle Image Upload
+    // -----------------------
     if (imageFile) {
       const fileName = `${Date.now()}-${imageFile.name}`;
       const { error: uploadError } = await supabase.storage
@@ -135,6 +138,9 @@ export async function addItem({
       imagePath = fileName;
     }
 
+    // -----------------------
+    // Insert into Items Table
+    // -----------------------
     const { error } = await supabase.from("items").insert([
       {
         name,
@@ -142,13 +148,18 @@ export async function addItem({
         location,
         status,
         image: imagePath,
+
+        // ⭐ FIX — Save real user data
         reported_by: userId,
         reporter_name: reporterName,
         reporter_email: reporterEmail,
 
-        // FK VALUES
+        // Foreign keys
         category_id: category,
         campus_id: campus,
+
+        // Timestamp
+        reported_at: new Date().toISOString(),
       },
     ]);
 
