@@ -38,27 +38,35 @@ export async function POST(req: Request) {
 
     // Upload image
     if (file) {
-      const ext = file.name.split(".").pop();
-      const fileName = `${claim_id}/${Date.now()}.${ext}`;
+  const ext = file.name.split(".").pop() || "png";
+  const fileName = `${claim_id}/${Date.now()}.${ext}`;
 
-      const { error: uploadErr } = await supabase.storage
-        .from("chat_uploads")
-        .upload(fileName, file, { upsert: false });
+  // Convert File → ArrayBuffer
+  const arrayBuffer = await file.arrayBuffer();
+  const buffer = new Uint8Array(arrayBuffer);
 
-      if (uploadErr) {
-        console.error(uploadErr);
-        return NextResponse.json(
-          { error: "Failed to upload image" },
-          { status: 500 }
-        );
-      }
+  const { error: uploadErr } = await supabase.storage
+    .from("chat_uploads")
+    .upload(fileName, buffer, {
+      contentType: file.type || "image/png",
+      upsert: false,
+    });
 
-      const { data: publicUrl } = supabase.storage
-        .from("chat_uploads")
-        .getPublicUrl(fileName);
+  if (uploadErr) {
+    console.error("UPLOAD ERROR:", uploadErr);
+    return NextResponse.json(
+      { error: "Failed to upload image" },
+      { status: 500 }
+    );
+  }
 
-      imageUrl = publicUrl?.publicUrl || null;
-    }
+  const { data: publicUrl } = supabase.storage
+    .from("chat_uploads")
+    .getPublicUrl(fileName);
+
+  imageUrl = publicUrl?.publicUrl || null;
+}
+
 
     // Prepare content
     const finalMessage = content || (imageUrl ? "[image]" : "");
