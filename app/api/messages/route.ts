@@ -2,12 +2,12 @@ import { NextResponse } from "next/server";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { cookies } from "next/headers";
 
-export const runtime = "nodejs"; // IMPORTANT: edge breaks file uploads
+export const runtime = "edge";
 
 export async function POST(req: Request) {
   try {
-    const cookieStore = cookies();
-    const supabase = createRouteHandlerClient({ cookies: cookieStore });
+    // ✔ FIXED: Pass cookies function (NOT cookies())
+    const supabase = createRouteHandlerClient({ cookies });
 
     // Read form data
     const form = await req.formData();
@@ -16,69 +16,77 @@ export async function POST(req: Request) {
     const file = form.get("image") as File | null;
 
     if (!claim_id) {
-      return NextResponse.json({ error: "Missing claim_id" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Missing claim_id" },
+        { status: 400 }
+      );
     }
 
-    // Get user
+    // Auth
     const {
       data: { user },
     } = await supabase.auth.getUser();
 
     if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return NextResponse.json(
+        { error: "Not authenticated" },
+        { status: 401 }
+      );
     }
 
     let imageUrl: string | null = null;
 
-    // Handle image upload
+    // Upload image
     if (file) {
       const ext = file.name.split(".").pop();
       const fileName = `${claim_id}/${Date.now()}.${ext}`;
 
       const { error: uploadErr } = await supabase.storage
         .from("chat_uploads")
-        .upload(fileName, file, {
-          upsert: false,
-        });
+        .upload(fileName, file, { upsert: false });
 
       if (uploadErr) {
         console.error(uploadErr);
         return NextResponse.json(
-          { error: "Image upload failed" },
+          { error: "Failed to upload image" },
           { status: 500 }
         );
       }
 
-      const { data } = supabase.storage
+      const { data: publicUrl } = supabase.storage
         .from("chat_uploads")
         .getPublicUrl(fileName);
 
-      imageUrl = data.publicUrl;
+      imageUrl = publicUrl?.publicUrl || null;
     }
 
+    // Prepare content
     const finalMessage = content || (imageUrl ? "[image]" : "");
 
-    // Insert message
-    const { data: row, error } = await supabase
+    // Insert
+    const { data, error } = await supabase
       .from("messages")
       .insert({
         claim_id,
         sender_id: user.id,
         content: finalMessage,
-        is_admin: false,
+        is_admin: user.user_metadata?.role === "admin",
         image_url: imageUrl,
       })
-      .select("*") // DO NOT join profiles, it causes your error
+      .select()
       .single();
 
     if (error) {
       console.error(error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json(
+        { error: "Failed to send message" },
+        { status: 500 }
+      );
     }
 
-    return NextResponse.json({ success: true, message: row });
-  } catch (err) {
-    console.error("SERVER ERROR", err);
+    return NextResponse.json({ success: true, message: data });
+  } catch (err: any) {
+    console.error("SERVER ERROR:", err);
     return NextResponse.json({ error: "Server error" }, { status: 500 });
   }
 }
