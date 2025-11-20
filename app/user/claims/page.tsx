@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
-// TYPES
+/* ---------------- TYPES ---------------- */
 type Item = {
   id: string;
   name: string;
@@ -30,10 +30,7 @@ type Message = {
   content: string;
   created_at: string;
   is_admin: boolean;
-  profiles?: {
-    full_name: string | null;
-    email: string | null;
-  };
+  image_url?: string | null;
 };
 
 export default function MyClaimsPage() {
@@ -42,14 +39,19 @@ export default function MyClaimsPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+
+  // image preview + file
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // AUTO SCROLL
+  /* ---------------- AUTO SCROLL ---------------- */
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // LOAD CLAIMS + ITEMS
+  /* ---------------- LOAD CLAIMS ---------------- */
   useEffect(() => {
     async function loadData() {
       const {
@@ -65,11 +67,7 @@ export default function MyClaimsPage() {
         .eq("claimed_by", user.id)
         .order("created_at", { ascending: false });
 
-      if (!claimRows || claimRows.length === 0) {
-        setClaims([]);
-        setLoading(false);
-        return;
-      }
+      if (!claimRows) return setLoading(false);
 
       const finalClaims = [];
 
@@ -80,13 +78,12 @@ export default function MyClaimsPage() {
           .eq("id", claim.item_id)
           .single();
 
-        // FIX IMAGE (convert supabase path → public URL)
         let imageUrl = null;
         if (itemData?.image) {
-          const { data: bucket } = supabase.storage
+          const { data: publicUrl } = supabase.storage
             .from("item-photos")
             .getPublicUrl(itemData.image);
-          imageUrl = bucket?.publicUrl || null;
+          imageUrl = publicUrl?.publicUrl || null;
         }
 
         finalClaims.push({
@@ -107,7 +104,7 @@ export default function MyClaimsPage() {
     loadData();
   }, []);
 
-  // LOAD MESSAGES FOR CHAT VIEW
+  /* ---------------- LOAD MESSAGES + REALTIME ---------------- */
   useEffect(() => {
     if (!selectedClaim) return;
 
@@ -116,7 +113,7 @@ export default function MyClaimsPage() {
     async function loadMessages() {
       const { data } = await supabase
         .from("messages")
-        .select("*, profiles:sender_id(full_name,email)")
+        .select("*")
         .eq("claim_id", claimId)
         .order("created_at", { ascending: true });
 
@@ -125,16 +122,15 @@ export default function MyClaimsPage() {
 
     loadMessages();
 
-    // LIVE CHAT LISTENER
     const channel = supabase
       .channel(`claim-${claimId}`)
       .on(
         "postgres_changes",
         {
           event: "INSERT",
+          schema: "public",
           table: "messages",
           filter: `claim_id=eq.${claimId}`,
-          schema: "public",
         },
         (payload) => {
           setMessages((prev) => [...prev, payload.new as Message]);
@@ -147,28 +143,49 @@ export default function MyClaimsPage() {
     };
   }, [selectedClaim]);
 
-  // SEND MESSAGE
+  /* ---------------- SEND MESSAGE (TEXT + IMAGE) ---------------- */
   async function sendMessage(e: any) {
     e.preventDefault();
-    const input = e.target.elements.message;
-    const content = input.value.trim();
+    if (!user || !selectedClaim) return;
 
-    if (!content || !user || !selectedClaim) return;
+    const text = e.target.elements.message.value.trim();
+
+    let imageUrl: string | null = null;
+
+    if (selectedFile) {
+      const ext = selectedFile.name.split(".").pop();
+      const fileName = `${selectedClaim.id}/${Date.now()}.${ext}`;
+
+      const { error: uploadErr } = await supabase.storage
+        .from("chat_uploads")
+        .upload(fileName, selectedFile);
+
+      if (!uploadErr) {
+        const { data } = supabase.storage
+          .from("chat_uploads")
+          .getPublicUrl(fileName);
+        imageUrl = data.publicUrl;
+      }
+    }
+
+    const finalContent = text || (imageUrl ? "[image]" : "");
 
     await supabase.from("messages").insert([
       {
         claim_id: selectedClaim.id,
         sender_id: user.id,
-        content,
+        content: finalContent,
         is_admin: false,
+        image_url: imageUrl,
       },
     ]);
 
-    input.value = "";
+    e.target.reset();
+    setPreviewImage(null);
+    setSelectedFile(null);
   }
 
-  // UI STARTS HERE --------------------------
-
+  /* ---------------- UI ---------------- */
   if (loading)
     return (
       <p className="text-center text-gray-400 pt-20">Loading your claims...</p>
@@ -180,7 +197,7 @@ export default function MyClaimsPage() {
         🧾 My Claims
       </h1>
 
-      {/* CLAIM LIST VIEW */}
+      {/* CLAIM LIST */}
       {!selectedClaim ? (
         claims.length === 0 ? (
           <p className="text-center text-gray-400">
@@ -191,7 +208,7 @@ export default function MyClaimsPage() {
             {claims.map((claim) => (
               <div
                 key={claim.id}
-                className="bg-gray-900 p-4 rounded-xl border border-gray-800 hover:border-ubGold cursor-pointer transition"
+                className="bg-gray-900 p-4 rounded-xl border border-gray-800 hover:border-ubGold cursor-pointer"
                 onClick={() => setSelectedClaim(claim)}
               >
                 <img
@@ -203,14 +220,12 @@ export default function MyClaimsPage() {
                 />
 
                 <h2 className="text-lg font-semibold text-white">
-                  {claim.item?.name || "Unknown Item"}
+                  {claim.item?.name}
                 </h2>
 
-                <p className="text-gray-500 text-sm">
-                  {claim.item?.campus || "No campus"}
-                </p>
+                <p className="text-gray-500 text-sm">{claim.item?.campus}</p>
 
-                <p className="text-gray-400 text-sm mt-2 line-clamp-2">
+                <p className="text-gray-400 mt-2 text-sm line-clamp-2">
                   {claim.message}
                 </p>
 
@@ -231,7 +246,6 @@ export default function MyClaimsPage() {
         )
       ) : (
         <>
-          {/* CHAT VIEW */}
           <button
             onClick={() => setSelectedClaim(null)}
             className="mb-4 px-4 py-2 bg-gray-800 text-white rounded-lg"
@@ -240,36 +254,9 @@ export default function MyClaimsPage() {
           </button>
 
           <div className="bg-gray-900 rounded-xl shadow p-4">
-            {/* ITEM TITLE */}
             <h2 className="text-xl font-bold text-white mb-2">
               {selectedClaim.item?.name}
             </h2>
-
-            {/* ITEM DESCRIPTION */}
-            <p className="text-gray-300 text-sm mb-2">
-              {selectedClaim.item?.description}
-            </p>
-
-            {/* LOCATION + CAMPUS */}
-            <p className="text-gray-400 text-xs mb-1">
-              📍 Location: {selectedClaim.item?.location || "Unknown"}
-            </p>
-            <p className="text-gray-400 text-xs mb-3">
-              🏫 Campus: {selectedClaim.item?.campus || "Unknown"}
-            </p>
-
-            {/* CLAIM MESSAGE (THE USER'S REASON) */}
-            {selectedClaim.message && (
-              <div className="mt-2 p-3 bg-gray-800 border border-gray-700 rounded-lg mb-4">
-                <p className="text-sm text-gray-300">
-                  <span className="font-semibold text-ubGold">
-                    Claim Message:
-                  </span>
-                  <br />
-                  {selectedClaim.message}
-                </p>
-              </div>
-            )}
 
             {/* MESSAGES */}
             <div className="h-[55vh] overflow-y-auto space-y-3 mb-4 p-2 border-t border-b border-gray-700">
@@ -289,9 +276,21 @@ export default function MyClaimsPage() {
                         : "bg-gray-800 text-white"
                     }`}
                   >
-                    <p>{msg.content}</p>
+                    {/* IMAGE */}
+                    {msg.image_url && (
+                      <img
+                        src={msg.image_url}
+                        className="w-40 rounded-lg mb-2 cursor-pointer"
+                        onClick={() =>
+                          window.open(msg.image_url!, "_blank")
+                        }
+                      />
+                    )}
 
-                    <p className="text-[10px] opacity-60 mt-1">
+                    {/* TEXT (ignore placeholder) */}
+                    {msg.content !== "[image]" && <p>{msg.content}</p>}
+
+                    <p className="text-[10px] opacity-60 mt-1 text-right">
                       {new Date(msg.created_at).toLocaleTimeString([], {
                         hour: "2-digit",
                         minute: "2-digit",
@@ -304,18 +303,55 @@ export default function MyClaimsPage() {
               <div ref={messagesEndRef} />
             </div>
 
+            {/* IMAGE PREVIEW */}
+            {previewImage && (
+              <div className="mb-2 flex items-center gap-3">
+                <img
+                  src={previewImage}
+                  className="w-20 h-20 object-cover rounded-lg border border-gray-700"
+                />
+                <button
+                  className="text-red-400 hover:underline"
+                  onClick={() => {
+                    setPreviewImage(null);
+                    setSelectedFile(null);
+                  }}
+                >
+                  Remove
+                </button>
+              </div>
+            )}
+
             {/* INPUT */}
             <form
               onSubmit={sendMessage}
               className="flex gap-2 border-t border-gray-700 pt-3"
+              encType="multipart/form-data"
             >
+              <label className="cursor-pointer bg-gray-800 px-3 py-2 rounded-lg border border-gray-700 text-white">
+                📎
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      setSelectedFile(file);
+                      setPreviewImage(URL.createObjectURL(file));
+                    }
+                  }}
+                />
+              </label>
+
               <input
-                type="text"
                 name="message"
-                placeholder="Type your message..."
+                type="text"
                 className="flex-1 px-3 py-2 bg-gray-800 text-white rounded-lg border border-gray-700"
+                placeholder="Type your message..."
               />
-              <button className="px-4 py-2 bg-ubGold text-black rounded-lg">
+
+              <button className="px-4 py-2 bg-ubGold text-black rounded-lg font-bold">
                 Send
               </button>
             </form>
