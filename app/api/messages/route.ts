@@ -6,10 +6,10 @@ export const runtime = "edge";
 
 export async function POST(req: Request) {
   try {
-    // ✔ FIXED: Pass cookies function (NOT cookies())
+    // Create Supabase client (IMPORTANT: pass cookies function)
     const supabase = createRouteHandlerClient({ cookies });
 
-    // Read form data
+    // Read form-data
     const form = await req.formData();
     const claim_id = form.get("claim_id") as string | null;
     const content = form.get("content") as string | null;
@@ -22,7 +22,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // Auth
+    // Auth check
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -36,56 +36,59 @@ export async function POST(req: Request) {
 
     let imageUrl: string | null = null;
 
-    // Upload image
+    /* ----------------------------------------------------
+     * IMAGE UPLOAD (Supabase Storage)
+     * ---------------------------------------------------- */
     if (file) {
-  const ext = file.name.split(".").pop() || "png";
-  const fileName = `${claim_id}/${Date.now()}.${ext}`;
+      const ext = file.name.split(".").pop() || "png";
+      const fileName = `${claim_id}/${Date.now()}.${ext}`;
 
-  // Convert File → ArrayBuffer
-  const arrayBuffer = await file.arrayBuffer();
-  const buffer = new Uint8Array(arrayBuffer);
+      // Convert File → Uint8Array buffer
+      const arrayBuffer = await file.arrayBuffer();
+      const buffer = new Uint8Array(arrayBuffer);
 
-  const { error: uploadErr } = await supabase.storage
-    .from("chat_uploads")
-    .upload(fileName, buffer, {
-      contentType: file.type || "image/png",
-      upsert: false,
-    });
+      const { error: uploadErr } = await supabase.storage
+        .from("chat_uploads")
+        .upload(fileName, buffer, {
+          contentType: file.type || "image/png",
+          upsert: false,
+        });
 
-  if (uploadErr) {
-    console.error("UPLOAD ERROR:", uploadErr);
-    return NextResponse.json(
-      { error: "Failed to upload image" },
-      { status: 500 }
-    );
-  }
+      if (uploadErr) {
+        console.error("UPLOAD ERROR:", uploadErr);
+        return NextResponse.json(
+          { error: "Failed to upload image" },
+          { status: 500 }
+        );
+      }
 
-  const { data: publicUrl } = supabase.storage
-    .from("chat_uploads")
-    .getPublicUrl(fileName);
+      // Get public URL
+      const { data: publicUrl } = supabase.storage
+        .from("chat_uploads")
+        .getPublicUrl(fileName);
 
-  imageUrl = publicUrl?.publicUrl || null;
-}
+      imageUrl = publicUrl?.publicUrl || null;
+    }
 
-
-    // Prepare content
+    /* ----------------------------------------------------
+     * STORE MESSAGE IN DATABASE
+     * ---------------------------------------------------- */
     const finalMessage = content || (imageUrl ? "[image]" : "");
 
-    // Insert
     const { data, error } = await supabase
       .from("messages")
       .insert({
         claim_id,
         sender_id: user.id,
         content: finalMessage,
-        is_admin: user.user_metadata?.role === "admin",
         image_url: imageUrl,
+        is_admin: user.user_metadata?.role === "admin",
       })
       .select()
       .single();
 
     if (error) {
-      console.error(error);
+      console.error("INSERT ERROR:", error);
       return NextResponse.json(
         { error: "Failed to send message" },
         { status: 500 }
