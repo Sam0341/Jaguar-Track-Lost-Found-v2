@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
-/* TYPES */
+/* -------------------- TYPES -------------------- */
 type Item = {
   id: string;
   name: string;
@@ -20,7 +20,7 @@ type Claim = {
   message: string | null;
   status: string | null;
   created_at: string;
-  item?: Item | null;
+  item?: Item;
 };
 
 type Message = {
@@ -32,6 +32,10 @@ type Message = {
   is_admin: boolean;
   image_url?: string | null;
 };
+
+/* ============================================================= */
+/*                     MAIN COMPONENT                            */
+/* ============================================================= */
 
 export default function MyClaimsPage() {
   const [claims, setClaims] = useState<Claim[]>([]);
@@ -45,12 +49,12 @@ export default function MyClaimsPage() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  /* AUTO SCROLL */
+  /* Auto-scroll */
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  /* LOAD CLAIMS */
+  /* ==================== LOAD CLAIMS ==================== */
   useEffect(() => {
     async function loadClaims() {
       const {
@@ -68,10 +72,11 @@ export default function MyClaimsPage() {
 
       if (!claimRows) {
         setClaims([]);
-        return setLoading(false);
+        setLoading(false);
+        return;
       }
 
-      const claimList: Claim[] = [];
+      const fullClaims: Claim[] = [];
 
       for (const claim of claimRows) {
         const { data: item } = await supabase
@@ -82,13 +87,14 @@ export default function MyClaimsPage() {
 
         let imageUrl = null;
         if (item?.image) {
-          const { data: pub } = supabase.storage
+          const { data: url } = supabase.storage
             .from("item-photos")
             .getPublicUrl(item.image);
-          imageUrl = pub?.publicUrl || null;
+
+          imageUrl = url.publicUrl;
         }
 
-        claimList.push({
+        fullClaims.push({
           ...claim,
           item: item
             ? {
@@ -99,80 +105,80 @@ export default function MyClaimsPage() {
         });
       }
 
-      setClaims(claimList);
+      setClaims(fullClaims);
       setLoading(false);
     }
 
     loadClaims();
   }, []);
 
-  /* LOAD MESSAGES + REALTIME */
+  /* ==================== LOAD MESSAGES + REALTIME ==================== */
   useEffect(() => {
-  if (!selectedClaim?.id) return; // safe check
-  const claimId = selectedClaim.id; // TS fix ✔
+    if (!selectedClaim?.id) return;
 
-  async function loadMessages() {
-    const { data, error } = await supabase
-      .from("messages")
-      .select("*")
-      .eq("claim_id", claimId) // now no underline
-      .order("created_at", { ascending: true });
+    async function loadMessages() {
+      const { data } = await supabase
+        .from("messages")
+        .select("*")
+        .eq("claim_id", selectedClaim.id)
+        .order("created_at", { ascending: true });
 
-    if (error) console.error(error);
-    setMessages(data || []);
-  }
+      setMessages(data || []);
+    }
 
-  loadMessages();
+    loadMessages();
 
-  /* REALTIME SUBSCRIPTION */
-  const channel = supabase
-    .channel(`claim-${claimId}`)
-    .on(
-      "postgres_changes",
-      {
-        event: "INSERT",
-        schema: "public",
-        table: "messages",
-        filter: `claim_id=eq.${claimId}`,
-      },
-      (payload) => {
-        setMessages((prev) => [...prev, payload.new as Message]);
-      }
-    )
-    .subscribe();
+    const channel = supabase
+      .channel(`claim-${selectedClaim.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "messages",
+          filter: `claim_id=eq.${selectedClaim.id}`,
+        },
+        (payload) => {
+          setMessages((prev) => [...prev, payload.new as Message]);
+        }
+      )
+      .subscribe();
 
-  return () => {
-    supabase.removeChannel(channel);
-  };
-}, [selectedClaim?.id]);
+    return () => supabase.removeChannel(channel);
+  }, [selectedClaim?.id]);
 
-  /* SEND MESSAGE */
+  /* ==================== SEND MESSAGE ==================== */
   async function sendMessage(e: any) {
     e.preventDefault();
     if (!selectedClaim || !user) return;
 
     const text = e.target.elements.message.value.trim();
+
     if (!text && !selectedFile) return;
 
     const form = new FormData();
     form.append("claim_id", selectedClaim.id);
     form.append("content", text || "");
 
-    if (selectedFile) form.append("image", selectedFile);
+    if (selectedFile) {
+      form.append("image", selectedFile);
+    }
 
-    await fetch("/api/messages", { method: "POST", body: form });
+    await fetch("/api/messages", {
+      method: "POST",
+      body: form,
+    });
 
     e.target.reset();
     setPreviewImage(null);
     setSelectedFile(null);
   }
 
-  /* UI ------------------------------ */
+  /* ==================== UI ==================== */
+
   if (loading)
     return (
-      <p className="text-center text-gray-400 pt-20">
-        Loading your claims...
-      </p>
+      <p className="text-center text-gray-400 mt-20">Loading your claims...</p>
     );
 
   return (
@@ -181,8 +187,8 @@ export default function MyClaimsPage() {
         🧾 My Claims
       </h1>
 
+      {/* ------------------------ CLAIM LIST ------------------------ */}
       {!selectedClaim ? (
-        /* CLAIM LIST */
         <div>
           {claims.length === 0 ? (
             <p className="text-center text-gray-400">
@@ -193,8 +199,8 @@ export default function MyClaimsPage() {
               {claims.map((claim) => (
                 <div
                   key={claim.id}
-                  className="bg-gray-900 p-4 rounded-xl border border-gray-800 hover:border-ubGold cursor-pointer transition"
                   onClick={() => setSelectedClaim(claim)}
+                  className="bg-gray-900 p-4 rounded-xl border border-gray-800 hover:border-ubGold cursor-pointer transition"
                 >
                   <img
                     src={
@@ -212,7 +218,7 @@ export default function MyClaimsPage() {
                     {claim.item?.campus}
                   </p>
 
-                  <p className="text-gray-400 mt-2 text-sm line-clamp-2">
+                  <p className="text-gray-400 text-sm mt-2 line-clamp-2">
                     {claim.message}
                   </p>
 
@@ -233,7 +239,7 @@ export default function MyClaimsPage() {
           )}
         </div>
       ) : (
-        /* CHAT VIEW */
+        /* ------------------------ CHAT VIEW ------------------------ */
         <>
           <button
             onClick={() => setSelectedClaim(null)}
@@ -247,20 +253,18 @@ export default function MyClaimsPage() {
               {selectedClaim.item?.name}
             </h2>
 
-            {/* CHAT MESSAGES */}
+            {/* Messages */}
             <div className="h-[55vh] overflow-y-auto space-y-3 mb-4 p-2 border-t border-b border-gray-700">
               {messages.map((msg) => (
                 <div
                   key={msg.id}
                   className={`flex ${
-                    msg.sender_id === user?.id
-                      ? "justify-end"
-                      : "justify-start"
+                    msg.sender_id === user.id ? "justify-end" : "justify-start"
                   }`}
                 >
                   <div
                     className={`p-3 rounded-xl max-w-[70%] ${
-                      msg.sender_id === user?.id
+                      msg.sender_id === user.id
                         ? "bg-ubGold text-black"
                         : "bg-gray-800 text-white"
                     }`}
@@ -270,9 +274,7 @@ export default function MyClaimsPage() {
                       <img
                         src={msg.image_url}
                         className="w-40 rounded-lg mb-2 cursor-pointer"
-                        onClick={() =>
-                          window.open(msg.image_url || "", "_blank")
-                        }
+                        onClick={() => window.open(msg.image_url!, "_blank")}
                       />
                     )}
 
@@ -311,11 +313,11 @@ export default function MyClaimsPage() {
               </div>
             )}
 
-            {/* INPUT BOX */}
+            {/* SEND BOX */}
             <form
               onSubmit={sendMessage}
-              className="flex gap-2 border-t border-gray-700 pt-3"
               encType="multipart/form-data"
+              className="flex gap-2 border-t border-gray-700 pt-3"
             >
               <label className="cursor-pointer bg-gray-800 px-3 py-2 rounded-lg border border-gray-700 text-white">
                 📎
