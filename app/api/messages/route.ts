@@ -2,14 +2,15 @@ import { NextResponse } from "next/server";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { cookies } from "next/headers";
 
-export const runtime = "edge"; // or node depending on your setup
+export const runtime = "edge";
 
 export async function POST(req: Request) {
   try {
+    // Correct way for Next.js 14
     const supabase = createRouteHandlerClient({ cookies });
 
     // ---------------------------
-    // GET REQUEST DATA
+    // READ FORM DATA
     // ---------------------------
     const form = await req.formData();
 
@@ -25,7 +26,7 @@ export async function POST(req: Request) {
     }
 
     // ---------------------------
-    // GET USER SESSION
+    // CHECK USER SESSION
     // ---------------------------
     const {
       data: { user },
@@ -41,7 +42,7 @@ export async function POST(req: Request) {
     let imageUrl: string | null = null;
 
     // ---------------------------
-    // HANDLE IMAGE UPLOAD
+    // IMAGE UPLOAD (IF ANY)
     // ---------------------------
     if (file) {
       const ext = file.name.split(".").pop();
@@ -59,15 +60,15 @@ export async function POST(req: Request) {
         );
       }
 
-      const { data: publicUrl } = supabase.storage
+      const { data: publicInfo } = supabase.storage
         .from("chat_uploads")
         .getPublicUrl(fileName);
 
-      imageUrl = publicUrl?.publicUrl || null;
+      imageUrl = publicInfo?.publicUrl || null;
     }
 
     // ---------------------------
-    // INSERT MESSAGE INTO DB
+    // INSERT INTO MESSAGES TABLE
     // ---------------------------
     const finalMessage = content || (imageUrl ? "[image]" : "");
 
@@ -78,7 +79,7 @@ export async function POST(req: Request) {
         sender_id: user.id,
         content: finalMessage,
         is_admin: user.user_metadata?.role === "admin",
-        image_url: imageUrl, // ADD THIS TO YOUR DB IF YOU WANT IMAGE MESSAGES
+        image_url: imageUrl,
       })
       .select()
       .single();
@@ -91,7 +92,6 @@ export async function POST(req: Request) {
       );
     }
 
-    // RETURN NEW MESSAGE
     return NextResponse.json({ success: true, message: data });
   } catch (err: any) {
     console.error("SERVER ERROR:", err);
