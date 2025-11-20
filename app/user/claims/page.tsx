@@ -105,39 +105,48 @@ export default function MyClaimsPage() {
   }, []);
 
   /* LOAD MESSAGES + REALTIME */
-  useEffect(() => {
-    if (!selectedClaim) return;
+  /* LOAD MESSAGES + REALTIME */
+useEffect(() => {
+  if (!selectedClaim) return; // stop if nothing selected
 
-    async function loadMessages() {
-      const { data } = await supabase
-        .from("messages")
-        .select("*, profiles:sender_id(full_name,email)")
-        .eq("claim_id", selectedClaim.id)
-        .order("created_at", { ascending: true });
+  // ✅ capture once, TS knows this is always a string
+  const claimId = selectedClaim.id;
 
-      setMessages(data || []);
-    }
+  async function loadMessages() {
+    const { data, error } = await supabase
+      .from("messages")
+      .select("*, profiles:sender_id(full_name,email)")
+      .eq("claim_id", claimId)
+      .order("created_at", { ascending: true });
 
-    loadMessages();
+    if (error) console.error(error);
+    setMessages(data || []);
+  }
 
-    const channel = supabase
-      .channel(`claim-${selectedClaim.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          table: "messages",
-          filter: `claim_id=eq.${selectedClaim.id}`,
-          schema: "public",
-        },
-        (payload) => {
-          setMessages((prev) => [...prev, payload.new as Message]);
-        }
-      )
-      .subscribe();
+  // initial load
+  loadMessages();
 
-    return () => supabase.removeChannel(channel);
-  }, [selectedClaim]);
+  // realtime subscription
+  const channel = supabase
+    .channel(`claim-${claimId}`)
+    .on(
+      "postgres_changes",
+      {
+        event: "INSERT",
+        table: "messages",
+        filter: `claim_id=eq.${claimId}`,
+        schema: "public",
+      },
+      (payload) => {
+        setMessages((prev) => [...prev, payload.new as Message]);
+      }
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}, [selectedClaim]);
 
   /* SEND MESSAGE (TEXT + IMAGE) */
   async function sendMessage(e: any) {
@@ -160,8 +169,7 @@ export default function MyClaimsPage() {
     e.target.reset();
   }
 
-  /* UI ------------------------------------------------------------ */
-
+  /* UI */
   if (loading)
     return (
       <p className="text-center text-gray-400 pt-20">Loading your claims...</p>
@@ -174,7 +182,6 @@ export default function MyClaimsPage() {
       </h1>
 
       {!selectedClaim ? (
-        /* CLAIM LIST */
         claims.length === 0 ? (
           <p className="text-center text-gray-400">
             You haven’t made any claims yet.
@@ -184,8 +191,8 @@ export default function MyClaimsPage() {
             {claims.map((claim) => (
               <div
                 key={claim.id}
-                className="bg-gray-900 p-4 rounded-xl border border-gray-800 hover:border-ubGold cursor-pointer transition"
                 onClick={() => setSelectedClaim(claim)}
+                className="bg-gray-900 p-4 rounded-xl border border-gray-800 hover:border-ubGold cursor-pointer transition"
               >
                 <img
                   src={
@@ -220,7 +227,6 @@ export default function MyClaimsPage() {
           </div>
         )
       ) : (
-        /* CHAT VIEW */
         <>
           <button
             onClick={() => setSelectedClaim(null)}
@@ -253,16 +259,14 @@ export default function MyClaimsPage() {
                         : "bg-gray-800 text-white"
                     }`}
                   >
-                    {/* IMAGE */}
                     {msg.image_url && (
                       <img
                         src={msg.image_url}
                         className="w-40 rounded-lg mb-2 cursor-pointer"
-                        onClick={() => window.open(msg.image_url, "_blank")}
+                        onClick={() => window.open(msg.image_url!, "_blank")}
                       />
                     )}
 
-                    {/* TEXT */}
                     {msg.content !== "[image]" && <p>{msg.content}</p>}
 
                     <p className="text-[10px] opacity-60 mt-1">
@@ -278,7 +282,6 @@ export default function MyClaimsPage() {
               <div ref={messagesEndRef} />
             </div>
 
-            {/* INPUT BOX */}
             <form
               onSubmit={sendMessage}
               className="flex gap-2 border-t border-gray-700 pt-3"
