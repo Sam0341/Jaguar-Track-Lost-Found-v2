@@ -502,6 +502,53 @@ useEffect(() => {
       </div>
     );
   }
+  /* ========================= DOWNLOAD CHAT ========================= */
+  function downloadChatTranscript() {
+    if (!selectedClaim) return;
+
+    if (messages.length === 0) {
+      alert("No messages to export.");
+      return;
+    }
+
+    const lines: string[] = [];
+
+    lines.push("Jaguar Track Lost & Found – Claim Chat Transcript");
+    lines.push("--------------------------------------------------");
+    lines.push(`Claim ID: ${selectedClaim.id}`);
+    lines.push(`Item: ${selectedClaim.item?.name || "Unknown"}`);
+    lines.push(`User: ${selectedClaim.user?.email || "Unknown"}`);
+    lines.push(`Status: ${selectedClaim.status}`);
+    lines.push("");
+    lines.push("CHAT LOG");
+    lines.push("--------------------------------------------------");
+    lines.push("");
+
+    messages.forEach((msg) => {
+      const who = msg.is_admin ? "ADMIN" : selectedClaim.user?.email || "USER";
+      const time = new Date(msg.created_at).toLocaleString();
+
+      if (msg.image_url) {
+        lines.push(`[${time}] ${who}: (Image) ${msg.image_url}`);
+      }
+
+      if (msg.content !== "[image]") {
+        lines.push(`[${time}] ${who}: ${msg.content}`);
+      }
+    });
+
+    const text = lines.join("\n");
+    const blob = new Blob([text], { type: "text/plain" });
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = `claim-${selectedClaim.id}-chat.txt`;
+    link.click();
+
+    URL.revokeObjectURL(url);
+  }
 
   /* ========================= CHAT VIEW ========================= */
   return (
