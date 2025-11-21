@@ -9,7 +9,7 @@ import React, {
 } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
-/* ---------------------------------- TYPES ---------------------------------- */
+/* ============================== TYPES ============================== */
 
 type ItemData = {
   id: string;
@@ -57,14 +57,11 @@ type Message = {
   profiles?: { full_name: string | null; email: string | null };
 };
 
-/* -------------------------------------------------------------------------- */
-/*                                MAIN COMPONENT                              */
-/* -------------------------------------------------------------------------- */
+/* ========================== MAIN COMPONENT ========================== */
 
 export default function AdminClaimsPage() {
   const [claims, setClaims] = useState<ClaimView[]>([]);
   const [selectedClaim, setSelectedClaim] = useState<ClaimView | null>(null);
-
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState("");
 
@@ -80,7 +77,7 @@ export default function AdminClaimsPage() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  /* ========================= FETCH ALL CLAIMS ========================= */
+  /* ===================== FETCH ALL CLAIMS ===================== */
 
   const fetchClaims = async () => {
     setErrorMsg(null);
@@ -153,87 +150,58 @@ export default function AdminClaimsPage() {
 
       setClaims(final);
     } catch (err: any) {
-      console.error("Fetch claims error:", err);
-      setErrorMsg(err.message || "Failed to fetch claims");
+      console.error("CLAIMS FETCH ERROR:", err);
+      setErrorMsg(err.message);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    setLoading(true);
-    fetchClaims();
-  }, []);
-  /* ========================= REALTIME DASHBOARD ========================= */
-
-  useEffect(() => {
-    const channel = supabase
-      .channel("admin-claims-dashboard")
-      .on(
-        "postgres_changes",
-        {
-          schema: "public",
-          table: "claims",
-          event: "*",
-        },
-        () => {
-          // refresh list when any claim changes
-          fetchClaims();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  /* ========================= CHAT: LOAD MESSAGES ========================= */
-
-  useEffect(() => {
-    if (!selectedClaim) return;
-
-    const claimId = selectedClaim.id;
-
-    async function loadMessages() {
-      const { data } = await supabase
-        .from("messages")
-        .select("*, profiles:sender_id(full_name,email)")
-        .eq("claim_id", claimId)
-        .order("created_at", { ascending: true });
-
-      setMessages(data || []);
-    }
-
-    loadMessages();
-
-    const channel = supabase
-      .channel(`claim-${claimId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          table: "messages",
-          schema: "public",
-          filter: `claim_id=eq.${claimId}`,
-        },
-        (payload) => {
-          setMessages((prev) => [...prev, payload.new as Message]);
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [selectedClaim]);
+      if (!selectedClaim) return;
+  
+      const claimId = selectedClaim.id;
+  
+      async function loadMessages() {
+        const { data } = await supabase
+          .from("messages")
+          .select(
+            "id, claim_id, sender_id, content, created_at, is_admin, image_url"
+          )
+          .eq("claim_id", claimId)
+          .order("created_at", { ascending: true });
+  
+        setMessages(data || []);
+      }
+  
+      loadMessages();
+  
+      const channel = supabase
+        .channel(`claim-${claimId}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "INSERT",
+            schema: "public",
+            table: "messages",
+            filter: `claim_id=eq.${claimId}`,
+          },
+          (payload) => {
+            setMessages((prev) => [...prev, payload.new as Message]);
+          }
+        )
+        .subscribe();
+  
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    }, [selectedClaim]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  /* ========================= SEND MESSAGE (ADMIN) ========================= */
+  /* ========================== SEND MESSAGE ========================== */
 
   async function sendMessage(e: FormEvent) {
     e.preventDefault();
@@ -256,81 +224,66 @@ export default function AdminClaimsPage() {
     setNewMessage("");
   }
 
-  /* ========================= EXPORT CHAT TRANSCRIPT ========================= */
+  /* ======================== DOWNLOAD CHAT ======================== */
 
   function downloadChatTranscript() {
     if (!selectedClaim) return;
 
-    if (messages.length === 0) {
-      alert("No messages to export for this claim yet.");
-      return;
-    }
+    const lines: string[] = [];
 
-    const headerLines: string[] = [];
-
-    headerLines.push("Jaguar Track Lost & Found – Claim Chat Transcript");
-    headerLines.push("--------------------------------------------------");
-    headerLines.push(`Claim ID: ${selectedClaim.id}`);
-    headerLines.push(
+    lines.push("Jaguar Track Lost & Found – Claim Chat Transcript");
+    lines.push("--------------------------------------------------");
+    lines.push(`Claim ID: ${selectedClaim.id}`);
+    lines.push(
       `Item: ${selectedClaim.item?.name || "Unknown item"} (${selectedClaim.item?.id})`
     );
-    headerLines.push(
+    lines.push(
       `User: ${
-        selectedClaim.user?.full_name || selectedClaim.user?.email || "Unknown user"
+        selectedClaim.user?.full_name ||
+        selectedClaim.user?.email ||
+        "Unknown user"
       }`
     );
-    headerLines.push(
-      `Campus: ${selectedClaim.campus || "N/A"} | Category: ${
-        selectedClaim.category || "N/A"
-      }`
-    );
-    headerLines.push(
-      `Claim status: ${selectedClaim.status || "pending"} | Item status: ${
-        selectedClaim.item?.status || "N/A"
-      }`
-    );
-    headerLines.push("");
-
-    const lines: string[] = [...headerLines];
+    lines.push("");
+    lines.push("----- CHAT START -----");
 
     messages.forEach((msg) => {
       const isAdmin = msg.sender_id !== selectedClaim.user?.id;
       const who = isAdmin
         ? "ADMIN"
-        : msg.profiles?.full_name ||
-          msg.profiles?.email ||
-          "USER";
+        : msg.profiles?.email || msg.profiles?.full_name || "USER";
 
       const time = new Date(msg.created_at).toLocaleString();
 
       lines.push(`[${time}] ${who}: ${msg.content}`);
     });
 
-    const text = lines.join("\n");
-    const blob = new Blob([text], {
+    lines.push("----- CHAT END -----");
+
+    const blob = new Blob(lines, {
       type: "text/plain;charset=utf-8",
     });
 
     const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
+    const a = document.createElement("a");
 
-    link.href = url;
-    link.download = `claim-${selectedClaim.id}-chat.txt`;
+    a.href = url;
+    a.download = `claim-${selectedClaim.id}-chat.txt`;
 
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
     URL.revokeObjectURL(url);
   }
 
-  /* ========================= APPROVE / REJECT ========================= */
+  /* ========================= UPDATE STATUS ========================= */
 
   async function updateClaimStatus(
     id: string,
     status: "approved" | "rejected"
   ) {
     setBusyStatusId(id);
+
     try {
       const { error } = await supabase
         .from("claims")
@@ -339,7 +292,7 @@ export default function AdminClaimsPage() {
 
       if (error) throw error;
 
-      await fetchClaims();
+      fetchClaims();
     } catch (err) {
       console.error(err);
     } finally {
@@ -353,6 +306,7 @@ export default function AdminClaimsPage() {
     if (!c.item) return;
 
     setBusyReturnId(c.id);
+
     try {
       const nowIso = new Date().toISOString();
 
@@ -360,25 +314,19 @@ export default function AdminClaimsPage() {
         data: { user: admin },
       } = await supabase.auth.getUser();
 
-      const itemUpdate: any = {
-        status: "Claimed",
-        claimed_at: nowIso,
-      };
-      if (c.user?.id) itemUpdate.claimed_by = c.user.id;
-
-      const { error: itemErr } = await supabase
+      await supabase
         .from("items")
-        .update(itemUpdate)
+        .update({
+          status: "Claimed",
+          claimed_at: nowIso,
+          claimed_by: c.user?.id || null,
+        })
         .eq("id", c.item.id);
 
-      if (itemErr) throw itemErr;
-
-      if (c.status !== "approved") {
-        await supabase
-          .from("claims")
-          .update({ status: "approved" })
-          .eq("id", c.id);
-      }
+      await supabase
+        .from("claims")
+        .update({ status: "approved" })
+        .eq("id", c.id);
 
       if (admin?.id) {
         await supabase.from("logs").insert([
@@ -391,15 +339,16 @@ export default function AdminClaimsPage() {
         ]);
       }
 
-      await fetchClaims();
+      fetchClaims();
     } catch (err) {
       console.error("Mark returned error:", err);
-      alert("Failed to mark item as returned.");
+      alert("Failed to mark returned");
     } finally {
       setBusyReturnId(null);
     }
   }
-  /* ========================= FILTERS & STATS ========================= */
+
+  /* ========================= FILTERING ========================= */
 
   const filteredClaims = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -427,18 +376,7 @@ export default function AdminClaimsPage() {
     });
   }, [claims, search, statusFilter]);
 
-  const stats = useMemo(() => {
-    const total = claims.length;
-    const pending = claims.filter(
-      (c) => (c.status || "pending") === "pending"
-    ).length;
-    const approved = claims.filter((c) => c.status === "approved").length;
-    const rejected = claims.filter((c) => c.status === "rejected").length;
-
-    return { total, pending, approved, rejected };
-  }, [claims]);
-
-  /* ========================= LOADING / ERROR ========================= */
+  /* ========================= LOADING STATES ========================= */
 
   if (loading)
     return (
@@ -454,63 +392,44 @@ export default function AdminClaimsPage() {
       </div>
     );
 
-  /* ========================= LIST VIEW ========================= */
+  /* ========================= CLAIM LIST VIEW ========================= */
 
   if (!selectedClaim) {
     return (
       <div className="p-6 max-w-7xl mx-auto">
+
         <h1 className="text-3xl font-bold text-ubGold mb-6">
           Claims Management
         </h1>
 
-        {/* Filters + Counters */}
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
-          <div className="flex gap-2 flex-wrap items-center">
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by item, campus, user, category…"
-              className="w-72 px-3 py-2 rounded-md bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 outline-none focus:ring-2 focus:ring-ubGold text-sm"
-            />
-            <select
-              value={statusFilter}
-              onChange={(e) =>
-                setStatusFilter(
-                  e.target.value as
-                    | "all"
-                    | "pending"
-                    | "approved"
-                    | "rejected"
-                )
-              }
-              className="px-3 py-2 rounded-md bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 text-sm outline-none focus:ring-2 focus:ring-ubGold"
-            >
-              <option value="all">All statuses</option>
-              <option value="pending">Pending</option>
-              <option value="approved">Approved</option>
-              <option value="rejected">Rejected</option>
-            </select>
-          </div>
+        {/* Filters */}
+        <div className="flex flex-col gap-3 md:flex-row md:justify-between mb-4">
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by item, campus, user, category…"
+            className="w-72 px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-white"
+          />
 
-          {/* Realtime counters */}
-          <div className="flex flex-wrap gap-2 text-xs md:text-sm">
-            <span className="px-3 py-1 rounded-full bg-gray-200 dark:bg-gray-800 text-gray-800 dark:text-gray-100">
-              Total: <b>{stats.total}</b>
-            </span>
-            <span className="px-3 py-1 rounded-full bg-yellow-100 text-yellow-900 dark:bg-yellow-900 dark:text-yellow-200">
-              Pending: <b>{stats.pending}</b>
-            </span>
-            <span className="px-3 py-1 rounded-full bg-green-100 text-green-900 dark:bg-green-900 dark:text-green-200">
-              Approved: <b>{stats.approved}</b>
-            </span>
-            <span className="px-3 py-1 rounded-full bg-red-100 text-red-900 dark:bg-red-900 dark:text-red-200">
-              Rejected: <b>{stats.rejected}</b>
-            </span>
-          </div>
+          <select
+            value={statusFilter}
+            onChange={(e) =>
+              setStatusFilter(
+                e.target.value as "all" | "pending" | "approved" | "rejected"
+              )
+            }
+            className="px-3 py-2 bg-gray-900 text-white rounded-md border border-gray-700"
+          >
+            <option value="all">All statuses</option>
+            <option value="pending">Pending</option>
+            <option value="approved">Approved</option>
+            <option value="rejected">Rejected</option>
+          </select>
         </div>
 
-        {/* Table */}
-        <div className="bg-gray-900 rounded-xl shadow border border-gray-700 overflow-hidden">
+        {/* CLAIMS TABLE */}
+        <div className="bg-gray-900 rounded-xl border border-gray-700 overflow-hidden shadow">
+
           <table className="min-w-full text-sm">
             <thead className="bg-gray-700 text-gray-200">
               <tr>
@@ -522,12 +441,13 @@ export default function AdminClaimsPage() {
                 <th className="px-4 py-3 text-center">Actions</th>
               </tr>
             </thead>
+
             <tbody>
               {filteredClaims.length === 0 && (
                 <tr>
                   <td
                     colSpan={6}
-                    className="py-6 text-center text-gray-500"
+                    className="py-5 text-center text-gray-500"
                   >
                     No claims match your filters.
                   </td>
@@ -543,20 +463,18 @@ export default function AdminClaimsPage() {
                 return (
                   <tr
                     key={c.id}
-                    className="border-b border-gray-800 hover:bg-gray-800/80 transition"
+                    className="border-b border-gray-800 hover:bg-gray-800/50"
                   >
                     <td className="px-4 py-3 font-semibold text-ubGold">
                       {c.item?.name || "—"}
                     </td>
-                    <td className="px-4 py-3">
-                      {c.campus || "—"}
-                    </td>
+                    <td className="px-4 py-3">{c.campus || "—"}</td>
                     <td className="px-4 py-3">
                       {c.user?.email || c.user?.full_name || "—"}
                     </td>
-                    <td className="px-4 py-3">
-                      {c.category || "—"}
-                    </td>
+                    <td className="px-4 py-3">{c.category || "—"}</td>
+
+                    {/* STATUS */}
                     <td className="px-4 py-3">
                       <span
                         className={`px-3 py-1 rounded-full text-xs font-semibold ${
@@ -570,8 +488,11 @@ export default function AdminClaimsPage() {
                         {effectiveStatus}
                       </span>
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap gap-2 justify-center">
+
+                    {/* ACTIONS */}
+                    <td className="px-4 py-3 text-center">
+                      <div className="flex gap-2 justify-center flex-wrap">
+
                         <button
                           onClick={() => setSelectedClaim(c)}
                           className="px-3 py-1 bg-blue-600 text-white rounded text-xs"
@@ -579,22 +500,24 @@ export default function AdminClaimsPage() {
                           Chat
                         </button>
 
+                        {/* Approve */}
                         <button
                           onClick={() =>
                             updateClaimStatus(c.id, "approved")
                           }
                           disabled={busyStatusId === c.id}
-                          className="px-3 py-1 bg-green-600 text-white rounded text-xs disabled:opacity-50"
+                          className="px-3 py-1 bg-green-600 text-white rounded text-xs disabled:opacity-40"
                         >
                           {busyStatusId === c.id ? "…" : "Approve"}
                         </button>
 
+                        {/* Reject */}
                         <button
                           onClick={() =>
                             updateClaimStatus(c.id, "rejected")
                           }
                           disabled={busyStatusId === c.id}
-                          className="px-3 py-1 bg-red-600 text-white rounded text-xs disabled:opacity-50"
+                          className="px-3 py-1 bg-red-600 text-white rounded text-xs disabled:opacity-40"
                         >
                           {busyStatusId === c.id ? "…" : "Reject"}
                         </button>
@@ -603,13 +526,12 @@ export default function AdminClaimsPage() {
                           <button
                             onClick={() => markItemReturned(c)}
                             disabled={busyReturnId === c.id}
-                            className="px-3 py-1 bg-ubGold text-black rounded text-xs disabled:opacity-50"
+                            className="px-3 py-1 bg-ubGold text-black rounded text-xs disabled:opacity-40"
                           >
-                            {busyReturnId === c.id
-                              ? "Marking…"
-                              : "Mark Returned"}
+                            {busyReturnId === c.id ? "…" : "Mark Returned"}
                           </button>
                         )}
+
                       </div>
                     </td>
                   </tr>
@@ -617,14 +539,17 @@ export default function AdminClaimsPage() {
               })}
             </tbody>
           </table>
+
         </div>
       </div>
     );
   }
+
   /* ========================= CHAT VIEW ========================= */
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
+
       <button
         onClick={() => setSelectedClaim(null)}
         className="mb-4 px-4 py-2 bg-gray-800 text-white rounded"
@@ -633,6 +558,8 @@ export default function AdminClaimsPage() {
       </button>
 
       <div className="bg-gray-900 p-4 rounded-xl border border-gray-700 shadow">
+
+        {/* HEADER */}
         <div className="flex justify-between items-start gap-4 mb-3">
           <div>
             <h2 className="text-xl font-bold text-white mb-1">
@@ -665,21 +592,8 @@ export default function AdminClaimsPage() {
               {selectedClaim.status || "pending"}
             </span>
 
-            <div className="flex gap-2 mt-1">
-              {(selectedClaim.status || "pending") === "approved" &&
-                selectedClaim.item?.status !== "Claimed" && (
-                  <button
-                    onClick={() => markItemReturned(selectedClaim)}
-                    disabled={busyReturnId === selectedClaim.id}
-                    className="px-3 py-1 bg-ubGold text-black rounded text-xs disabled:opacity-50"
-                  >
-                    {busyReturnId === selectedClaim.id
-                      ? "Marking…"
-                      : "Mark Item Returned"}
-                  </button>
-                )}
+            <div className="flex gap-2">
 
-              {/* NEW: Download chat transcript */}
               <button
                 onClick={downloadChatTranscript}
                 className="px-3 py-1 bg-gray-700 text-white rounded text-xs hover:bg-gray-600"
@@ -687,12 +601,15 @@ export default function AdminClaimsPage() {
                 Download Chat
               </button>
             </div>
+
           </div>
         </div>
 
+        {/* CHAT AREA */}
         <div className="h-[50vh] overflow-y-auto space-y-3 mb-4 p-2 border-t border-b border-gray-700">
           {messages.map((msg) => {
-            const isAdmin = msg.sender_id !== selectedClaim.user?.id;
+            const isAdmin =
+              msg.sender_id !== selectedClaim.user?.id;
 
             return (
               <div
@@ -716,6 +633,7 @@ export default function AdminClaimsPage() {
                           msg.profiles?.full_name ||
                           "User"}
                     </span>
+
                     <span className="text-[10px] opacity-70">
                       {new Date(msg.created_at).toLocaleTimeString([], {
                         hour: "2-digit",
@@ -723,14 +641,18 @@ export default function AdminClaimsPage() {
                       })}
                     </span>
                   </div>
+
                   <p className="text-sm">{msg.content}</p>
                 </div>
               </div>
             );
           })}
+
           <div ref={messagesEndRef} />
+
         </div>
 
+        {/* INPUT BOX */}
         <form
           onSubmit={sendMessage}
           className="flex gap-2 border-t border-gray-700 pt-3"
@@ -742,6 +664,7 @@ export default function AdminClaimsPage() {
             placeholder="Type your message…"
             className="flex-1 px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-white outline-none focus:ring-2 focus:ring-ubGold"
           />
+
           <button
             type="submit"
             className="px-4 py-2 bg-ubGold text-black rounded-lg font-semibold hover:bg-yellow-400"
@@ -749,6 +672,7 @@ export default function AdminClaimsPage() {
             Send
           </button>
         </form>
+
       </div>
     </div>
   );
