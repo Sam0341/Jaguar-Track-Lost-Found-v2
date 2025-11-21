@@ -168,69 +168,81 @@ export default function AdminClaimsPage() {
 
   /* ========================= REALTIME CLAIM UPDATES ========================= */
   useEffect(() => {
-    const channel = supabase
-      .channel("admin-claims-dashboard")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "claims",
-        },
-        () => fetchClaims()
-      )
-      .subscribe();
+  const channel = supabase
+    .channel("admin-claims-dashboard")
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "claims",
+      },
+      () => fetchClaims()
+    )
+    .subscribe();
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, []);
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}, []);
 
   /* ========================= LOAD + REALTIME MESSAGES ========================= */
-  useEffect(() => {
-    if (!selectedClaim) return;
+  /* ===================== LOAD + REALTIME MESSAGES ===================== */
+useEffect(() => {
+  if (!selectedClaim) return;
 
-    const claimId = selectedClaim.id;
+  const claimId = selectedClaim.id;
 
-    async function loadMessages() {
-      const { data } = await supabase
-        .from("messages")
-        .select("*")
-        .eq("claim_id", claimId)
-        .order("created_at", { ascending: true });
+  async function loadMessages() {
+    const { data } = await supabase
+      .from("messages")
+      .select(`
+        id,
+        claim_id,
+        sender_id,
+        content,
+        created_at,
+        is_admin,
+        image_url
+      `)
+      .eq("claim_id", claimId)
+      .order("created_at", { ascending: true });
 
-      setMessages(data || []);
+    setMessages(data || []);
+  }
+
+  loadMessages();
+
+  const channel = supabase
+  .channel(`claim-${claimId}`)
+  .on(
+    "postgres_changes",
+    {
+      event: "INSERT",
+      schema: "public",
+      table: "messages",
+      filter: `claim_id=eq.${claimId}`,
+    },
+    (payload) => {
+      setMessages((prev: Message[]) => [
+        ...prev,
+        payload.new as Message,
+      ]);
     }
+  )
+  .subscribe();
 
-    loadMessages();
-
-    const channel = supabase
-      .channel(`claim-${claimId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "messages",
-          filter: `claim_id=eq.${claimId}`,
-        },
-        (payload) => {
-          setMessages((prev) => [...prev, payload.new as Message]);
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [selectedClaim]);
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}, [selectedClaim]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   /* ========================= ADMIN SEND MESSAGE ========================= */
-  async function sendMessage(e: FormEvent) {
+  async function sendMessage(e: any) {
     e.preventDefault();
     if (!selectedClaim) return;
 
@@ -239,9 +251,7 @@ export default function AdminClaimsPage() {
     } = await supabase.auth.getUser();
     if (!user) return;
 
-    const form = e.target as HTMLFormElement;
-    const text = (form.elements.namedItem("message") as HTMLInputElement).value.trim();
-
+    const text = e.target.elements.message.value.trim();
     let imageUrl: string | null = null;
 
     if (selectedFile) {
@@ -272,11 +282,226 @@ export default function AdminClaimsPage() {
       },
     ]);
 
-    form.reset();
+    e.target.reset();
     setSelectedFile(null);
     setPreviewImage(null);
   }
 
+  /* ========================= CHANGE CLAIM STATUS ========================= */
+  async function updateClaimStatus(id: string, status: "approved" | "rejected") {
+    setBusyStatusId(id);
+    await supabase.from("claims").update({ status }).eq("id", id);
+    setBusyStatusId(null);
+    fetchClaims();
+  }
+
+  /* ========================= MARK RETURNED ========================= */
+  async function markItemReturned(c: ClaimView) {
+    if (!c.item) return;
+    setBusyReturnId(c.id);
+
+    const nowIso = new Date().toISOString();
+    const {
+      data: { user: admin },
+    } = await supabase.auth.getUser();
+
+    await supabase.from("items").update({ status: "Claimed" }).eq("id", c.item.id);
+
+    if (c.status !== "approved") {
+      await supabase.from("claims").update({ status: "approved" }).eq("id", c.id);
+    }
+
+    if (admin?.id) {
+      await supabase.from("logs").insert([
+        {
+          action: "item_returned",
+          item_id: c.item.id,
+          performed_by: admin.id,
+          timestamp: nowIso,
+        },
+      ]);
+    }
+
+    setBusyReturnId(null);
+    fetchClaims();
+  }
+
+  /* ========================= FILTERS ========================= */
+  const filteredClaims = useMemo(() => {
+    const term = search.toLowerCase();
+
+    return claims.filter((c) => {
+      const statusValue = (c.status || "pending").toLowerCase();
+
+      const statusOk = statusFilter === "all" || statusValue === statusFilter;
+
+      const haystack = [
+        c.item?.name,
+        c.campus,
+        c.category,
+        c.user?.email,
+        c.user?.full_name,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      return statusOk && haystack.includes(term);
+    });
+  }, [claims, search, statusFilter]);
+
+  /* ========================= UI ========================= */
+
+  if (loading)
+    return <div className="text-center py-10 text-gray-400">Loading claims…</div>;
+
+  if (errorMsg)
+    return (
+      <div className="text-center py-10 text-red-400">
+        Failed to load claims: {errorMsg}
+      </div>
+    );
+
+  /* ========================= CLAIMS LIST VIEW ========================= */
+  if (!selectedClaim) {
+    return (
+      <div className="p-6 max-w-7xl mx-auto">
+        <h1 className="text-3xl font-bold text-ubGold mb-6">
+          Claims Management
+        </h1>
+
+        {/* FILTERS */}
+        <div className="flex flex-col md:flex-row justify-between gap-3 mb-4">
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by item, campus, user, category…"
+            className="w-72 px-3 py-2 rounded-md bg-gray-900 border border-gray-700 outline-none focus:ring-2 focus:ring-ubGold text-sm"
+          />
+
+          <select
+            value={statusFilter}
+            onChange={(e) =>
+              setStatusFilter(
+                e.target.value as "all" | "pending" | "approved" | "rejected"
+              )
+            }
+            className="px-3 py-2 rounded-md bg-gray-900 border border-gray-700 text-sm"
+          >
+            <option value="all">All statuses</option>
+            <option value="pending">Pending</option>
+            <option value="approved">Approved</option>
+            <option value="rejected">Rejected</option>
+          </select>
+        </div>
+
+        {/* TABLE */}
+        <div className="bg-gray-900 rounded-xl shadow border border-gray-700 overflow-hidden">
+          <table className="min-w-full text-sm">
+            <thead className="bg-gray-700 text-gray-200">
+              <tr>
+                <th className="px-4 py-3 text-left">Item</th>
+                <th className="px-4 py-3 text-left">Campus</th>
+                <th className="px-4 py-3 text-left">User</th>
+                <th className="px-4 py-3 text-left">Category</th>
+                <th className="px-4 py-3 text-left">Status</th>
+                <th className="px-4 py-3 text-center">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredClaims.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={6}
+                    className="py-6 text-center text-gray-500"
+                  >
+                    No claims found.
+                  </td>
+                </tr>
+              )}
+
+              {filteredClaims.map((c) => {
+                const effectiveStatus = c.status || "pending";
+
+                return (
+                  <tr
+                    key={c.id}
+                    className="border-b border-gray-800 hover:bg-gray-800/80 transition"
+                  >
+                    <td className="px-4 py-3 font-semibold text-ubGold">
+                      {c.item?.name}
+                    </td>
+                    <td className="px-4 py-3">{c.campus}</td>
+                    <td className="px-4 py-3">
+                      {c.user?.email || c.user?.full_name}
+                    </td>
+                    <td className="px-4 py-3">{c.category}</td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                          effectiveStatus === "approved"
+                            ? "bg-green-600 text-white"
+                            : effectiveStatus === "rejected"
+                            ? "bg-red-600 text-white"
+                            : "bg-yellow-500 text-black"
+                        }`}
+                      >
+                        {effectiveStatus}
+                      </span>
+                    </td>
+
+                    <td className="px-4 py-3">
+                      <div className="flex gap-2 justify-center">
+                        <button
+                          onClick={() => setSelectedClaim(c)}
+                          className="px-3 py-1 bg-blue-600 text-white rounded text-xs"
+                        >
+                          Chat
+                        </button>
+
+                        <button
+                          onClick={() =>
+                            updateClaimStatus(c.id, "approved")
+                          }
+                          disabled={busyStatusId === c.id}
+                          className="px-3 py-1 bg-green-600 text-white rounded text-xs disabled:opacity-50"
+                        >
+                          {busyStatusId === c.id ? "…" : "Approve"}
+                        </button>
+
+                        <button
+                          onClick={() =>
+                            updateClaimStatus(c.id, "rejected")
+                          }
+                          disabled={busyStatusId === c.id}
+                          className="px-3 py-1 bg-red-600 text-white rounded text-xs disabled:opacity-50"
+                        >
+                          {busyStatusId === c.id ? "…" : "Reject"}
+                        </button>
+
+                        {effectiveStatus === "approved" &&
+                          c.item?.status !== "Claimed" && (
+                            <button
+                              onClick={() => markItemReturned(c)}
+                              disabled={busyReturnId === c.id}
+                              className="px-3 py-1 bg-ubGold text-black rounded text-xs disabled:opacity-50"
+                            >
+                              {busyReturnId === c.id
+                                ? "Marking…"
+                                : "Mark Returned"}
+                            </button>
+                          )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
   /* ========================= DOWNLOAD CHAT ========================= */
   function downloadChatTranscript() {
     if (!selectedClaim) return;
@@ -326,16 +551,6 @@ export default function AdminClaimsPage() {
   }
 
   /* ========================= CHAT VIEW ========================= */
-  if (!selectedClaim) {
-    return (
-      <div className="p-6 max-w-7xl mx-auto">
-        {/* CLAIMS LIST (unchanged) */}
-        { /* ... your full list code stays here ... */ }
-      </div>
-    );
-  }
-
-  /* ========================= SELECTED CLAIM CHAT UI ========================= */
   return (
     <div className="p-6 max-w-4xl mx-auto">
       <button
@@ -346,7 +561,6 @@ export default function AdminClaimsPage() {
       </button>
 
       <div className="bg-gray-900 p-4 rounded-xl border border-gray-700 shadow">
-        
         {/* HEADER */}
         <div className="flex justify-between items-start gap-4 mb-3">
           <div>
@@ -370,27 +584,17 @@ export default function AdminClaimsPage() {
             )}
           </div>
 
-          <div className="flex flex-col gap-2 items-end">
-            <span
-              className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                (selectedClaim.status || "pending") === "approved"
-                  ? "bg-green-600 text-white"
-                  : (selectedClaim.status || "pending") === "rejected"
-                  ? "bg-red-600 text-white"
-                  : "bg-yellow-500 text-black"
-              }`}
-            >
-              {selectedClaim.status || "pending"}
-            </span>
-
-            {/* ⭐ DOWNLOAD BUTTON */}
-            <button
-              onClick={downloadChatTranscript}
-              className="px-3 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-500"
-            >
-              ⬇ Download Chat
-            </button>
-          </div>
+          <span
+            className={`px-3 py-1 rounded-full text-xs font-semibold ${
+              (selectedClaim.status || "pending") === "approved"
+                ? "bg-green-600 text-white"
+                : (selectedClaim.status || "pending") === "rejected"
+                ? "bg-red-600 text-white"
+                : "bg-yellow-500 text-black"
+            }`}
+          >
+            {selectedClaim.status || "pending"}
+          </span>
         </div>
 
         {/* MESSAGES */}
@@ -405,7 +609,9 @@ export default function AdminClaimsPage() {
               >
                 <div
                   className={`p-3 rounded-xl max-w-[70%] shadow ${
-                    isAdmin ? "bg-ubGold text-black" : "bg-gray-800 text-white"
+                    isAdmin
+                      ? "bg-ubGold text-black"
+                      : "bg-gray-800 text-white"
                   }`}
                 >
                   {msg.image_url && (
