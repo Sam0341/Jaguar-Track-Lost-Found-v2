@@ -504,51 +504,81 @@ useEffect(() => {
   }
   /* ========================= DOWNLOAD CHAT ========================= */
   function downloadChatTranscript() {
-    if (!selectedClaim) return;
+  if (!selectedClaim) return;
 
-    if (messages.length === 0) {
-      alert("No messages to export.");
-      return;
-    }
+  //-- 1: Prepare user label (full name → email → Unknown)
+  const userLabel =
+    selectedClaim.user?.full_name ||
+    selectedClaim.user?.email ||
+    "Unknown User";
 
-    const lines: string[] = [];
+  //-- 2: Skip if no messages
+  if (messages.length === 0) {
+    alert("No messages to export.");
+    return;
+  }
 
-    lines.push("Jaguar Track Lost & Found – Claim Chat Transcript");
-    lines.push("--------------------------------------------------");
-    lines.push(`Claim ID: ${selectedClaim.id}`);
-    lines.push(`Item: ${selectedClaim.item?.name || "Unknown"}`);
-    lines.push(`User: ${selectedClaim.user?.email || "Unknown"}`);
-    lines.push(`Status: ${selectedClaim.status}`);
-    lines.push("");
-    lines.push("CHAT LOG");
-    lines.push("--------------------------------------------------");
-    lines.push("");
+  //-- 3: Header info
+  const lines: string[] = [];
 
-    messages.forEach((msg) => {
-      const who = msg.is_admin ? "ADMIN" : selectedClaim.user?.email || "USER";
-      const time = new Date(msg.created_at).toLocaleString();
+  lines.push("Jaguar Track Lost & Found – Claim Chat Transcript");
+  lines.push("--------------------------------------------------");
+  lines.push(`Claim ID: ${selectedClaim.id}`);
+  lines.push(`Item: ${selectedClaim.item?.name || "Unknown"}`);
+  lines.push(`User: ${userLabel}`);
+  lines.push(`Status: ${selectedClaim.status || "pending"}`);
+  lines.push("");
+  lines.push("CHAT LOG");
+  lines.push("--------------------------------------------------");
+  lines.push("");
 
-      if (msg.image_url) {
-        lines.push(`[${time}] ${who}: (Image) ${msg.image_url}`);
-      }
+  //-- 4: Format messages
+  messages.forEach((msg) => {
+    // Skip empty text messages
+    const hasText =
+      msg.content && msg.content.trim() !== "" && msg.content !== "[image]";
 
-      if (msg.content !== "[image]") {
-        lines.push(`[${time}] ${who}: ${msg.content}`);
-      }
+    const hasImage = !!msg.image_url;
+
+    if (!hasText && !hasImage) return; // don't include empty entries
+
+    const sender = msg.is_admin
+      ? "ADMIN"
+      : userLabel; // user full name/email, not "USER"
+
+    const time = new Date(msg.created_at).toLocaleString([], {
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
     });
 
-    const text = lines.join("\n");
-    const blob = new Blob([text], { type: "text/plain" });
+    if (hasText) {
+      lines.push(`[${time}] ${sender}: ${msg.content}`);
+    }
 
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
+    if (hasImage) {
+      lines.push(`[${time}] ${sender} (Image):`);
+      lines.push(`${msg.image_url}`);
+    }
 
-    link.href = url;
-    link.download = `claim-${selectedClaim.id}-chat.txt`;
-    link.click();
+    lines.push(""); // spacing between messages
+  });
 
-    URL.revokeObjectURL(url);
-  }
+  //-- 5: Convert to file and download
+  const text = lines.join("\n");
+  const blob = new Blob([text], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `claim-${selectedClaim.id}-chat.txt`;
+  link.click();
+
+  URL.revokeObjectURL(url);
+}
+
 
   /* ========================= CHAT VIEW ========================= */
   return (
