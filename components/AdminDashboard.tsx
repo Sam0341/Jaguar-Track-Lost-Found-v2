@@ -4,6 +4,19 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { addLog } from "@/lib/logs";
 
+// ======================
+// TYPES
+// ======================
+type ReportDetails = {
+  report_type: string;
+  description: string;
+  storage_location: string;
+  expiration_date: string | null;
+  created_at: string;
+  handled_by: string | null;
+  handled_by_name?: string | null;
+};
+
 type Item = {
   id: string;
   name: string;
@@ -15,21 +28,9 @@ type Item = {
   reported_at?: string;
   dropoff_location?: string;
   location?: string;
-
-  // joined
   category_name?: string;
   campus_name?: string;
-
-  // joined report details
-  report?: {
-    report_type: string;
-    description: string;
-    storage_location: string;
-    expiration_date: string | null;
-    created_at: string;
-    handled_by: string | null;
-    handled_by_name?: string | null;
-  } | null;
+  report?: ReportDetails | null;
 };
 
 export default function AdminDashboard() {
@@ -39,7 +40,7 @@ export default function AdminDashboard() {
 
   const [selectedItem, setSelectedItem] = useState<Item | null>(null);
   const [showModal, setShowModal] = useState(false);
-  const [reportOpen, setReportOpen] = useState(false); // expand/collapse
+  const [reportOpen, setReportOpen] = useState(false);
 
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
@@ -47,6 +48,9 @@ export default function AdminDashboard() {
 
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
 
+  // ======================
+  // LOAD ITEMS + REPORTS
+  // ======================
   useEffect(() => {
     fetchItems();
   }, []);
@@ -72,13 +76,15 @@ export default function AdminDashboard() {
       .order("reported_at", { ascending: false });
 
     if (error) {
-      console.error("Error:", error);
+      console.error("Error loading Admin Dashboard:", error);
       setLoading(false);
       return;
     }
 
-    // Load handled_by admin names
-    const itemsWithHandledBy = await Promise.all(
+    // ======================
+    // Resolve handled_by full name
+    // ======================
+    const itemsWithHandlers = await Promise.all(
       (data || []).map(async (item: any) => {
         let handled_by_name = null;
 
@@ -96,6 +102,7 @@ export default function AdminDashboard() {
           ...item,
           category_name: item.categories?.name || "Unknown",
           campus_name: item.campuses?.name || "Unknown",
+
           report: item.report
             ? {
                 ...item.report,
@@ -106,20 +113,23 @@ export default function AdminDashboard() {
       })
     );
 
-    setItems(itemsWithHandledBy);
-    setFilteredItems(itemsWithHandledBy);
+    setItems(itemsWithHandlers);
+    setFilteredItems(itemsWithHandlers);
     setLoading(false);
   }
 
+  // ======================
+  // SEARCH + FILTER
+  // ======================
   useEffect(() => {
-    let filtered = [...items];
+    let list = [...items];
 
-    if (statusFilter !== "All") filtered = filtered.filter((item) => item.status === statusFilter);
-    if (campusFilter !== "All") filtered = filtered.filter((item) => item.campus_name === campusFilter);
+    if (statusFilter !== "All") list = list.filter((i) => i.status === statusFilter);
+    if (campusFilter !== "All") list = list.filter((i) => i.campus_name === campusFilter);
 
     if (searchTerm.trim()) {
       const t = searchTerm.toLowerCase();
-      filtered = filtered.filter(
+      list = list.filter(
         (i) =>
           i.name.toLowerCase().includes(t) ||
           (i.reporter_name || "").toLowerCase().includes(t) ||
@@ -127,12 +137,23 @@ export default function AdminDashboard() {
       );
     }
 
-    setFilteredItems(filtered);
+    setFilteredItems(list);
   }, [items, searchTerm, statusFilter, campusFilter]);
 
+  // ======================
+  // HELPERS
+  // ======================
   const formatDate = (d?: string | null) =>
     d ? new Date(d).toLocaleDateString("en-BZ", { month: "short", day: "numeric", year: "numeric" }) : "—";
 
+  function showToast(msg: string, type: "success" | "error") {
+    setToast({ message: msg, type });
+    setTimeout(() => setToast(null), 3500);
+  }
+
+  // ======================
+  // ACTION: MARK CLAIMED
+  // ======================
   async function markAsClaimed(id: string) {
     if (!confirm("Mark this item as claimed?")) return;
 
@@ -149,6 +170,9 @@ export default function AdminDashboard() {
     } else showToast("Error updating item", "error");
   }
 
+  // ======================
+  // ACTION: DELETE
+  // ======================
   async function deleteItem(id: string) {
     if (!confirm("Delete this item?")) return;
 
@@ -165,11 +189,9 @@ export default function AdminDashboard() {
     } else showToast("Delete failed", "error");
   }
 
-  function showToast(msg: string, type: "success" | "error") {
-    setToast({ message: msg, type });
-    setTimeout(() => setToast(null), 3500);
-  }
-
+  // ======================
+  // RENDER
+  // ======================
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <h1 className="text-3xl font-bold text-ubGold mb-6">Admin Dashboard</h1>
@@ -189,7 +211,7 @@ export default function AdminDashboard() {
         <input
           type="text"
           className="px-4 py-2 bg-gray-800 border border-gray-700 rounded text-white flex-1"
-          placeholder="Search by name or reporter..."
+          placeholder="Search by name, reporter, email..."
           onChange={(e) => setSearchTerm(e.target.value)}
         />
 
@@ -208,8 +230,8 @@ export default function AdminDashboard() {
           onChange={(e) => setCampusFilter(e.target.value)}
         >
           <option>All</option>
-          {Array.from(new Set(items.map((i) => i.campus_name))).map((campus) => (
-            <option key={campus}>{campus}</option>
+          {Array.from(new Set(items.map((i) => i.campus_name))).map((c) => (
+            <option key={c}>{c}</option>
           ))}
         </select>
       </div>
@@ -284,7 +306,6 @@ export default function AdminDashboard() {
               ✕
             </button>
 
-            {/* IMAGE */}
             {selectedItem.image && (
               <img
                 src={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/item-photos/${selectedItem.image}`}
@@ -292,94 +313,42 @@ export default function AdminDashboard() {
               />
             )}
 
-            {/* BASIC INFO */}
             <h2 className="text-2xl font-bold text-ubGold mb-2">{selectedItem.name}</h2>
 
-            <p className="text-gray-300 text-sm">
-              <strong>Category:</strong> {selectedItem.category_name}
-            </p>
-
-            <p className="text-gray-300 text-sm">
-              <strong>Campus:</strong> {selectedItem.campus_name}
-            </p>
-
-            <p className="text-gray-300 text-sm">
-              <strong>Status:</strong> {selectedItem.status}
-            </p>
-
-            <p className="text-gray-300 text-sm">
-              <strong>Drop-Off:</strong> {selectedItem.dropoff_location || "N/A"}
-            </p>
-
-            <p className="text-gray-300 text-sm">
-              <strong>Current Storage:</strong> {selectedItem.location || "N/A"}
-            </p>
-
-            <p className="text-gray-300 text-sm">
-              <strong>Reporter:</strong> {selectedItem.reporter_name || "Unknown"}
-            </p>
-
-            <p className="text-gray-300 text-sm">
-              <strong>Email:</strong> {selectedItem.reporter_email || "N/A"}
-            </p>
-
-            <p className="text-gray-300 text-sm">
-              <strong>Reported At:</strong> {formatDate(selectedItem.reported_at)}
-            </p>
+            <p className="text-gray-300"><strong>Category:</strong> {selectedItem.category_name}</p>
+            <p className="text-gray-300"><strong>Campus:</strong> {selectedItem.campus_name}</p>
+            <p className="text-gray-300"><strong>Status:</strong> {selectedItem.status}</p>
+            <p className="text-gray-300"><strong>Drop-Off:</strong> {selectedItem.dropoff_location || "N/A"}</p>
+            <p className="text-gray-300"><strong>Storage:</strong> {selectedItem.location || "N/A"}</p>
+            <p className="text-gray-300"><strong>Reporter:</strong> {selectedItem.reporter_name || "Unknown"}</p>
+            <p className="text-gray-300"><strong>Email:</strong> {selectedItem.reporter_email || "N/A"}</p>
+            <p className="text-gray-300"><strong>Reported:</strong> {formatDate(selectedItem.reported_at)}</p>
 
             {selectedItem.description && (
-              <p className="text-gray-300 text-sm mt-2">
+              <p className="text-gray-300 mt-2">
                 <strong>Description:</strong> {selectedItem.description}
               </p>
             )}
 
-            {/* REPORT DETAILS SECTION */}
+            {/* REPORT DETAILS */}
             {selectedItem.report && (
               <div className="mt-5">
                 <button
-                  className="w-full px-4 py-2 flex justify-between items-center bg-gray-800 border border-gray-700 rounded"
                   onClick={() => setReportOpen(!reportOpen)}
+                  className="w-full px-4 py-2 flex justify-between items-center bg-gray-800 border border-gray-700 rounded"
                 >
                   <span>📄 Report Details</span>
-                  <span
-                    className={`transition-transform ${
-                      reportOpen ? "rotate-90" : ""
-                    }`}
-                  >
-                    ▶
-                  </span>
+                  <span className={`transition-transform ${reportOpen ? "rotate-90" : ""}`}>▶</span>
                 </button>
 
                 {reportOpen && (
                   <div className="mt-3 p-3 bg-gray-800 border border-gray-700 rounded text-sm space-y-2">
-                    <p>
-                      <strong>Report Type:</strong> {selectedItem.report.report_type}
-                    </p>
-
-                    <p>
-                      <strong>Description:</strong>{" "}
-                      {selectedItem.report.description || "N/A"}
-                    </p>
-
-                    <p>
-                      <strong>Storage Location:</strong>{" "}
-                      {selectedItem.report.storage_location || "N/A"}
-                    </p>
-
-                    <p>
-                      <strong>Expiration:</strong>{" "}
-                      {formatDate(selectedItem.report.expiration_date)}
-                    </p>
-
-                    <p>
-                      <strong>Created At:</strong>{" "}
-                      {formatDate(selectedItem.report.created_at)}
-                    </p>
-
-                    <p>
-                      <strong>Handled By:</strong>{" "}
-                      {selectedItem.report.handled_by_name || "System"}
-                    </p>
+                    <p><strong>Report Type:</strong> {selectedItem.report.report_type}</p>
+                    <p><strong>Description:</strong> {selectedItem.report.description || "N/A"}</p>
+                    <p><strong>Storage Location:</strong> {selectedItem.report.storage_location || "N/A"}</p>
+                    <p><strong>Expiration:</strong> {formatDate(selectedItem.report.expiration_date)}</p>
+                    <p><strong>Created:</strong> {formatDate(selectedItem.report.created_at)}</p>
+                    <p><strong>Handled By:</strong> {selectedItem.report.handled_by_name || "System"}</p>
                   </div>
                 )}
               </div>
