@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { addLog } from "@/lib/logs";
 
+/* ================== TYPES ================== */
 type Item = {
   id: string;
   name: string;
@@ -30,6 +31,9 @@ type Item = {
   } | null;
 };
 
+/* ==========================================================
+                    MAIN ADMIN DASHBOARD
+========================================================== */
 export default function AdminDashboard() {
   const [items, setItems] = useState<Item[]>([]);
   const [filteredItems, setFilteredItems] = useState<Item[]>([]);
@@ -45,6 +49,7 @@ export default function AdminDashboard() {
 
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
 
+  /* ============= FETCH ITEMS ============= */
   useEffect(() => {
     fetchItems();
   }, []);
@@ -70,12 +75,13 @@ export default function AdminDashboard() {
       .order("reported_at", { ascending: false });
 
     if (error) {
-      console.error("Error:", error);
+      console.error("Error loading items:", error);
       setLoading(false);
       return;
     }
 
-    const itemsWithHandledBy = await Promise.all(
+    // Get admin names for handled_by
+    const joined = await Promise.all(
       (data || []).map(async (item: any) => {
         let handled_by_name = null;
 
@@ -103,20 +109,21 @@ export default function AdminDashboard() {
       })
     );
 
-    setItems(itemsWithHandledBy);
-    setFilteredItems(itemsWithHandledBy);
+    setItems(joined);
+    setFilteredItems(joined);
     setLoading(false);
   }
 
+  /* ============= FILTERING ============= */
   useEffect(() => {
-    let filtered = [...items];
+    let result = [...items];
 
-    if (statusFilter !== "All") filtered = filtered.filter((item) => item.status === statusFilter);
-    if (campusFilter !== "All") filtered = filtered.filter((item) => item.campus_name === campusFilter);
+    if (statusFilter !== "All") result = result.filter((i) => i.status === statusFilter);
+    if (campusFilter !== "All") result = result.filter((i) => i.campus_name === campusFilter);
 
     if (searchTerm.trim()) {
       const t = searchTerm.toLowerCase();
-      filtered = filtered.filter(
+      result = result.filter(
         (i) =>
           i.name.toLowerCase().includes(t) ||
           (i.reporter_name || "").toLowerCase().includes(t) ||
@@ -124,17 +131,18 @@ export default function AdminDashboard() {
       );
     }
 
-    setFilteredItems(filtered);
+    setFilteredItems(result);
   }, [items, searchTerm, statusFilter, campusFilter]);
 
   const formatDate = (d?: string | null) =>
     d ? new Date(d).toLocaleDateString("en-BZ", { month: "short", day: "numeric", year: "numeric" }) : "—";
 
+  /* ============= ACTIONS ============= */
   async function markAsClaimed(id: string) {
     if (!confirm("Mark this item as claimed?")) return;
 
-    const { data: authData } = await supabase.auth.getUser();
-    const admin = authData?.user;
+    const { data: auth } = await supabase.auth.getUser();
+    const admin = auth?.user;
 
     const { error } = await supabase.from("items").update({ status: "Claimed" }).eq("id", id);
 
@@ -149,8 +157,8 @@ export default function AdminDashboard() {
   async function deleteItem(id: string) {
     if (!confirm("Delete this item?")) return;
 
-    const { data: authData } = await supabase.auth.getUser();
-    const admin = authData?.user;
+    const { data: auth } = await supabase.auth.getUser();
+    const admin = auth?.user;
 
     const { error } = await supabase.from("items").delete().eq("id", id);
 
@@ -162,17 +170,18 @@ export default function AdminDashboard() {
     } else showToast("Delete failed", "error");
   }
 
-  function showToast(msg: string, type: "success" | "error") {
-    setToast({ message: msg, type });
-    setTimeout(() => setToast(null), 3500);
+  function showToast(message: string, type: "success" | "error") {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
   }
 
-  // Count unique storage rooms
+  /* ============= COUNTS ============= */
   const uniqueStorageRooms = Array.from(new Set(items.map((i) => i.location).filter(Boolean))).length;
-
-  // Count campuses
   const uniqueCampuses = Array.from(new Set(items.map((i) => i.campus_name))).length;
 
+  /* ==========================================================
+                        RENDER
+  ========================================================== */
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <h1 className="text-3xl font-bold text-ubGold mb-6">Admin Dashboard</h1>
@@ -187,7 +196,7 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {/* ======= TOP STATS ROW (C1) ======= */}
+      {/* ======= STATS ======= */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
         <StatCard label="Total Items" value={items.length} />
         <StatCard label="Lost" value={items.filter((i) => i.status === "Lost").length} />
@@ -197,10 +206,9 @@ export default function AdminDashboard() {
         <StatCard label="Storage Rooms" value={uniqueStorageRooms} />
       </div>
 
-      {/* Filters */}
+      {/* ======= FILTERS ======= */}
       <div className="flex flex-wrap gap-3 mb-6">
         <input
-          type="text"
           className="px-4 py-2 bg-gray-800 border border-gray-700 rounded text-white flex-1"
           placeholder="Search by name or reporter..."
           onChange={(e) => setSearchTerm(e.target.value)}
@@ -227,7 +235,7 @@ export default function AdminDashboard() {
         </select>
       </div>
 
-      {/* Table */}
+      {/* ======= TABLE ======= */}
       {!loading && filteredItems.length === 0 && (
         <p className="text-center text-gray-400">No items found.</p>
       )}
@@ -259,7 +267,6 @@ export default function AdminDashboard() {
                   <td className="px-4 py-3 text-ubGold">{item.name}</td>
                   <td className="px-4 py-3">{item.category_name}</td>
                   <td className="px-4 py-3">{item.campus_name}</td>
-
                   <td className="px-4 py-3">
                     <span
                       className={`px-3 py-1 rounded-full text-xs ${
@@ -273,11 +280,8 @@ export default function AdminDashboard() {
                       {item.status}
                     </span>
                   </td>
-
                   <td className="px-4 py-3 text-right">
-                    <button className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-white">
-                      View
-                    </button>
+                    <button className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-white">View</button>
                   </td>
                 </tr>
               ))}
@@ -286,11 +290,14 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {/* ================= MODAL ================= */}
+      {/* ==========================================================
+                          MODAL
+      ========================================================== */}
       {showModal && selectedItem && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-          <div className="bg-gray-900 border border-gray-700 rounded-xl max-w-2xl w-full p-6 relative shadow-2xl">
+          <div className="bg-gray-900 border border-gray-700 rounded-2xl max-w-lg w-full p-6 relative shadow-2xl">
 
+            {/* Close */}
             <button
               onClick={() => setShowModal(false)}
               className="absolute top-3 right-4 text-gray-400 text-xl hover:text-white"
@@ -298,6 +305,7 @@ export default function AdminDashboard() {
               ✕
             </button>
 
+            {/* Image */}
             {selectedItem.image && (
               <img
                 src={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/item-photos/${selectedItem.image}`}
@@ -305,16 +313,19 @@ export default function AdminDashboard() {
               />
             )}
 
-            <h2 className="text-3xl font-bold text-ubGold mb-1">{selectedItem.name}</h2>
-            <p className="text-gray-400 mb-4 text-sm">
+            {/* Title */}
+            <h2 className="text-2xl font-bold text-ubGold">{selectedItem.name}</h2>
+            <p className="text-gray-400 text-sm mb-4">
               {selectedItem.category_name} • {selectedItem.campus_name}
             </p>
 
-            {/* INFO CARDS */}
+            {/* Info Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
+              {/* Item Info */}
               <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
                 <h3 className="text-lg font-semibold text-white mb-3">Item Information</h3>
+
                 <p className="text-sm text-gray-300">
                   <strong>Status:</strong>
                   <span
@@ -330,15 +341,9 @@ export default function AdminDashboard() {
                   </span>
                 </p>
 
-                <p className="text-sm text-gray-300 mt-2">
-                  <strong>Drop-Off:</strong> {selectedItem.dropoff_location || "N/A"}
-                </p>
-                <p className="text-sm text-gray-300 mt-1">
-                  <strong>Storage:</strong> {selectedItem.location || "N/A"}
-                </p>
-                <p className="text-sm text-gray-300 mt-1">
-                  <strong>Reported:</strong> {formatDate(selectedItem.reported_at)}
-                </p>
+                <p className="text-sm text-gray-300 mt-2"><strong>Drop-Off:</strong> {selectedItem.dropoff_location || "N/A"}</p>
+                <p className="text-sm text-gray-300 mt-1"><strong>Storage:</strong> {selectedItem.location || "N/A"}</p>
+                <p className="text-sm text-gray-300 mt-1"><strong>Reported:</strong> {formatDate(selectedItem.reported_at)}</p>
 
                 {selectedItem.description && (
                   <p className="text-sm text-gray-300 mt-2">
@@ -347,9 +352,12 @@ export default function AdminDashboard() {
                 )}
               </div>
 
+              {/* Reporter Info */}
               <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
                 <h3 className="text-lg font-semibold text-white mb-3">Reporter Information</h3>
+
                 <p className="text-sm text-gray-300"><strong>Name:</strong> {selectedItem.reporter_name || "Unknown"}</p>
+
                 <p className="text-sm text-gray-300 mt-1">
                   <strong>Email:</strong>{" "}
                   <a href={`mailto:${selectedItem.reporter_email}`} className="text-blue-400 underline">
@@ -360,7 +368,7 @@ export default function AdminDashboard() {
 
             </div>
 
-            {/* REPORT DETAILS */}
+            {/* Report Details */}
             {selectedItem.report && (
               <div className="mt-6">
                 <button
@@ -373,18 +381,21 @@ export default function AdminDashboard() {
 
                 {reportOpen && (
                   <div className="mt-3 bg-gray-800 border border-gray-700 rounded-lg p-4 text-sm space-y-2">
+
                     <p><strong>Type:</strong> {selectedItem.report.report_type}</p>
-                    <p><strong>Description:</strong> {selectedItem.report.description || "N/A"}</p>
-                    <p><strong>Storage Location:</strong> {selectedItem.report.storage_location}</p>
-                    <p><strong>Expiration:</strong> {formatDate(selectedItem.report.expiration_date)}</p>
+
+                    {/* Expiration Badge */}
+                    <ExpirationSection report={selectedItem.report} />
+
                     <p><strong>Created:</strong> {formatDate(selectedItem.report.created_at)}</p>
-                    <p><strong>Handled By:</strong> {selectedItem.report.handled_by_name}</p>
+                    <p><strong>Handled By:</strong> {selectedItem.report.handled_by_name || "System"}</p>
+
                   </div>
                 )}
               </div>
             )}
 
-            {/* ACTION BUTTONS */}
+            {/* Actions */}
             <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-700">
               <button
                 onClick={() => markAsClaimed(selectedItem.id)}
@@ -415,12 +426,46 @@ export default function AdminDashboard() {
   );
 }
 
-/* ===== STAT CARD COMPONENT ===== */
+/* ==========================================================
+        STAT CARD
+========================================================== */
 function StatCard({ label, value }: { label: string; value: number }) {
   return (
     <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 text-center">
       <p className="text-3xl font-bold text-ubGold">{value}</p>
       <p className="text-gray-400 text-sm mt-1">{label}</p>
     </div>
+  );
+}
+
+/* ==========================================================
+        EXPIRATION BADGE COMPONENT
+========================================================== */
+function ExpirationSection({ report }: any) {
+  if (!report?.expiration_date) {
+    return <p><strong>Expiration:</strong> —</p>;
+  }
+
+  const exp = new Date(report.expiration_date).getTime();
+  const now = Date.now();
+  const daysLeft = Math.ceil((exp - now) / (1000 * 60 * 60 * 24));
+
+  let color = "bg-blue-600";
+  let label = `${daysLeft} days left`;
+
+  if (daysLeft <= 30) color = "bg-yellow-600";
+  if (daysLeft <= 7) color = "bg-red-600";
+  if (daysLeft <= 0) {
+    color = "bg-red-700";
+    label = "Expired";
+  }
+
+  return (
+    <p>
+      <strong>Expiration:</strong> {new Date(report.expiration_date).toLocaleDateString()}
+      <span className={`ml-2 px-2 py-1 rounded text-xs text-white ${color}`}>
+        {label}
+      </span>
+    </p>
   );
 }
