@@ -34,7 +34,7 @@ type Item = {
 };
 
 /* ============================================================
-   DASHBOARD COMPONENT
+   MAIN COMPONENT
 ============================================================ */
 export default function AdminDashboard() {
   const [items, setItems] = useState<Item[]>([]);
@@ -51,7 +51,10 @@ export default function AdminDashboard() {
   const [editingExpiration, setEditingExpiration] = useState(false);
   const [newExpiration, setNewExpiration] = useState("");
 
-  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  const [toast, setToast] = useState<{
+    message: string;
+    type: "success" | "error";
+  } | null>(null);
 
   /* ============================================================
      FETCH ITEMS
@@ -113,13 +116,16 @@ export default function AdminDashboard() {
   }
 
   /* ============================================================
-     FILTERING
+     FILTERING LOGIC
   ============================================================ */
   useEffect(() => {
     let filtered = [...items];
 
-    if (statusFilter !== "All") filtered = filtered.filter((i) => i.status === statusFilter);
-    if (campusFilter !== "All") filtered = filtered.filter((i) => i.campus_name === campusFilter);
+    if (statusFilter !== "All")
+      filtered = filtered.filter((i) => i.status === statusFilter);
+
+    if (campusFilter !== "All")
+      filtered = filtered.filter((i) => i.campus_name === campusFilter);
 
     if (searchTerm.trim()) {
       const t = searchTerm.toLowerCase();
@@ -162,9 +168,9 @@ export default function AdminDashboard() {
     const diff = date.getTime() - today.getTime();
     const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
 
-    if (days <= 0) return "text-red-600 font-semibold"; // expired
-    if (days <= 3) return "text-yellow-600 font-semibold"; // warning
-    return "text-green-600 font-semibold"; // safe
+    if (days <= 0) return "text-red-600 font-semibold";
+    if (days <= 3) return "text-yellow-600 font-semibold";
+    return "text-green-600 font-semibold";
   }
 
   function showToast(msg: string, type: "success" | "error") {
@@ -224,8 +230,13 @@ export default function AdminDashboard() {
   /* ============================================================
      COUNTERS
   ============================================================ */
-  const uniqueStorageRooms = Array.from(new Set(items.map((i) => i.location).filter(Boolean))).length;
-  const uniqueCampuses = Array.from(new Set(items.map((i) => i.campus_name))).length;
+  const uniqueStorageRooms = Array.from(
+    new Set(items.map((i) => i.location).filter(Boolean))
+  ).length;
+
+  const uniqueCampuses = Array.from(
+    new Set(items.map((i) => i.campus_name))
+  ).length;
 
   /* ============================================================
      RENDER
@@ -244,14 +255,25 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      <h1 className="text-3xl font-bold text-ubGold mb-6">Admin Dashboard</h1>
+      <h1 className="text-3xl font-bold text-ubGold mb-6">
+        Admin Dashboard
+      </h1>
 
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
         <StatCard label="Total Items" value={items.length} />
-        <StatCard label="Lost" value={items.filter((i) => i.status === "Lost").length} />
-        <StatCard label="Found" value={items.filter((i) => i.status === "Found").length} />
-        <StatCard label="Claimed" value={items.filter((i) => i.status === "Claimed").length} />
+        <StatCard
+          label="Lost"
+          value={items.filter((i) => i.status === "Lost").length}
+        />
+        <StatCard
+          label="Found"
+          value={items.filter((i) => i.status === "Found").length}
+        />
+        <StatCard
+          label="Claimed"
+          value={items.filter((i) => i.status === "Claimed").length}
+        />
         <StatCard label="Campuses" value={uniqueCampuses} />
         <StatCard label="Storage Rooms" value={uniqueStorageRooms} />
       </div>
@@ -330,145 +352,179 @@ export default function AdminDashboard() {
                   </td>
 
                   <td className="px-4 py-3 text-right">
-                    <button className="px-3 py-1 bg-gray-200 dark:bg-gray-700 rounded">View</button>
+                    <button className="px-3 py-1 bg-gray-200 dark:bg-gray-700 rounded">
+                      View
+                    </button>
                   </td>
                 </tr>
               ))}
             </tbody>
-
           </table>
         </div>
       )}
 
       {/* ============================================================
-         MODAL
+         MODAL (NEW 2-COLUMN MODAL – WIDE & CLEAN)
       ============================================================ */}
       {showModal && selectedItem && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-          <div className="bg-white dark:bg-gray-900 border rounded-lg w-full max-w-md p-6 relative shadow-xl">
-
-            {/* Close button */}
+          <div className="bg-white dark:bg-gray-900 border rounded-xl w-full max-w-4xl p-6 relative shadow-2xl">
+            
+            {/* Close Button */}
             <button
               onClick={() => setShowModal(false)}
-              className="absolute top-3 right-4 text-gray-500 hover:text-black"
+              className="absolute top-4 right-4 text-gray-400 hover:text-white text-xl"
             >
               ✕
             </button>
 
-            {/* Image */}
-            {selectedItem.image && (
-              <img
-                src={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/item-photos/${selectedItem.image}`}
-                className="w-full h-48 object-cover rounded-lg mb-4"
-              />
-            )}
-
-            {/* Title */}
-            <h2 className="text-xl font-bold text-ubGold">{selectedItem.name}</h2>
-            <p className="text-gray-500 dark:text-gray-400 mb-4">
-              {selectedItem.category_name} • {selectedItem.campus_name}
-            </p>
-
-            {/* Item Info */}
-            <div className="bg-gray-100 dark:bg-gray-800 border rounded-lg p-4 mb-4">
-              <h3 className="font-semibold mb-2">Item Information</h3>
-
-              <p className="text-sm">
-                <strong>Status:</strong>{" "}
-                <span
-                  className={`px-2 py-1 rounded text-xs text-white ${
-                    selectedItem.status === "Claimed"
-                      ? "bg-green-600"
-                      : selectedItem.status === "Lost"
-                      ? "bg-yellow-600"
-                      : "bg-blue-600"
-                  }`}
-                >
-                  {selectedItem.status}
-                </span>
-              </p>
-
-              <p className="text-sm mt-2"><strong>Drop-Off:</strong> {selectedItem.dropoff_location || "N/A"}</p>
-              <p className="text-sm"><strong>Storage:</strong> {selectedItem.location || "N/A"}</p>
-              <p className="text-sm"><strong>Reported:</strong> {formatDate(selectedItem.reported_at)}</p>
-              <p className="text-sm"><strong>Time:</strong> {formatTime(selectedItem.reported_at)}</p>
-
-              {selectedItem.description && (
-                <p className="mt-2 text-sm"><strong>Description:</strong> {selectedItem.description}</p>
+            {/* HEADER */}
+            <div className="flex gap-6">
+              {/* IMAGE */}
+              {selectedItem.image && (
+                <img
+                  src={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/item-photos/${selectedItem.image}`}
+                  className="w-1/2 h-64 object-cover rounded-lg shadow-md"
+                />
               )}
-            </div>
 
-            {/* Reporter */}
-            <div className="bg-gray-100 dark:bg-gray-800 border rounded-lg p-4 mb-4">
-              <h3 className="font-semibold mb-2">Reporter Information</h3>
-
-              <p className="text-sm"><strong>Name:</strong> {selectedItem.reporter_name || "Unknown"}</p>
-
-              <p className="text-sm">
-                <strong>Email:</strong>{" "}
-                <a href={`mailto:${selectedItem.reporter_email}`} className="text-blue-500 underline">
-                  {selectedItem.reporter_email || "N/A"}
-                </a>
-              </p>
-            </div>
-
-            {/* Expiration */}
-            <div className="bg-gray-100 dark:bg-gray-800 border rounded-lg p-4 mb-4">
-              <h3 className="font-semibold mb-2">Expiration</h3>
-
-              {!editingExpiration ? (
-                <p className="text-sm flex items-center gap-2">
-                  <strong>Date:</strong>
-
-                  <span className={getExpirationColor(selectedItem.report?.expiration_date)}>
-                    {selectedItem.report?.expiration_date
-                      ? formatDate(selectedItem.report.expiration_date)
-                      : "—"}
-                  </span>
-
-                  <button
-                    onClick={() => {
-                      setEditingExpiration(true);
-                      setNewExpiration(
-                        selectedItem.report?.expiration_date
-                          ? selectedItem.report.expiration_date.split("T")[0]
-                          : ""
-                      );
-                    }}
-                    className="text-blue-500 underline text-sm"
-                  >
-                    Edit
-                  </button>
+              {/* TITLE + META */}
+              <div className="w-1/2 flex flex-col justify-center">
+                <h2 className="text-3xl font-bold text-ubGold">
+                  {selectedItem.name}
+                </h2>
+                <p className="text-gray-500 dark:text-gray-400 mt-2 text-lg">
+                  {selectedItem.category_name} • {selectedItem.campus_name}
                 </p>
-              ) : (
-                <div className="flex items-center gap-2">
-                  <input
-                    type="date"
-                    value={newExpiration}
-                    onChange={(e) => setNewExpiration(e.target.value)}
-                    className="px-2 py-1 bg-gray-800 border border-gray-600 rounded text-white"
-                  />
-                  <button
-                    onClick={saveExpiration}
-                    className="px-3 py-1 bg-green-600 rounded text-white text-sm"
-                  >
-                    Save
-                  </button>
-                  <button
-                    onClick={() => setEditingExpiration(false)}
-                    className="px-3 py-1 bg-gray-600 rounded text-white text-sm"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              )}
+
+                <p className="text-md text-gray-400 mt-3">
+                  Reported: {formatDate(selectedItem.reported_at)} —{" "}
+                  {formatTime(selectedItem.reported_at)}
+                </p>
+              </div>
             </div>
 
-            {/* Footer Buttons */}
-            <div className="flex justify-between mt-4">
+            {/* 2-COLUMN LAYOUT */}
+            <div className="grid grid-cols-2 gap-6 mt-8">
+
+              {/* ITEM INFO */}
+              <div className="bg-gray-100 dark:bg-gray-800 border rounded-lg p-4">
+                <h3 className="font-semibold text-lg mb-2">Item Information</h3>
+
+                <p className="text-sm">
+                  <strong>Status:</strong>{" "}
+                  <span
+                    className={`px-2 py-1 rounded text-xs text-white ${
+                      selectedItem.status === "Claimed"
+                        ? "bg-green-600"
+                        : selectedItem.status === "Lost"
+                        ? "bg-yellow-600"
+                        : "bg-blue-600"
+                    }`}
+                  >
+                    {selectedItem.status}
+                  </span>
+                </p>
+
+                <p className="text-sm mt-2">
+                  <strong>Drop-Off:</strong>{" "}
+                  {selectedItem.dropoff_location || "N/A"}
+                </p>
+
+                <p className="text-sm">
+                  <strong>Storage:</strong> {selectedItem.location || "N/A"}
+                </p>
+
+                {selectedItem.description && (
+                  <p className="text-sm mt-2">
+                    <strong>Description:</strong> {selectedItem.description}
+                  </p>
+                )}
+              </div>
+
+              {/* REPORTER INFO */}
+              <div className="bg-gray-100 dark:bg-gray-800 border rounded-lg p-4">
+                <h3 className="font-semibold text-lg mb-2">
+                  Reporter Information
+                </h3>
+
+                <p className="text-sm">
+                  <strong>Name:</strong>{" "}
+                  {selectedItem.reporter_name || "Unknown"}
+                </p>
+
+                <p className="text-sm mt-1">
+                  <strong>Email:</strong>{" "}
+                  <a
+                    href={`mailto:${selectedItem.reporter_email}`}
+                    className="text-blue-500 underline"
+                  >
+                    {selectedItem.reporter_email || "N/A"}
+                  </a>
+                </p>
+              </div>
+
+              {/* EXPIRATION */}
+              <div className="bg-gray-100 dark:bg-gray-800 border rounded-lg p-4 col-span-2">
+                <h3 className="font-semibold text-lg mb-2">Expiration</h3>
+
+                {!editingExpiration ? (
+                  <p className="text-sm flex items-center gap-2">
+                    <strong>Date:</strong>
+                    <span
+                      className={getExpirationColor(
+                        selectedItem.report?.expiration_date
+                      )}
+                    >
+                      {selectedItem.report?.expiration_date
+                        ? formatDate(selectedItem.report.expiration_date)
+                        : "—"}
+                    </span>
+
+                    <button
+                      onClick={() => {
+                        setEditingExpiration(true);
+                        setNewExpiration(
+                          selectedItem.report?.expiration_date
+                            ? selectedItem.report.expiration_date.split("T")[0]
+                            : ""
+                        );
+                      }}
+                      className="text-blue-500 underline text-sm"
+                    >
+                      Edit
+                    </button>
+                  </p>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="date"
+                      value={newExpiration}
+                      onChange={(e) => setNewExpiration(e.target.value)}
+                      className="px-2 py-1 bg-gray-800 border border-gray-600 rounded text-white"
+                    />
+                    <button
+                      onClick={saveExpiration}
+                      className="px-3 py-1 bg-green-600 rounded text-white text-sm"
+                    >
+                      Save
+                    </button>
+                    <button
+                      onClick={() => setEditingExpiration(false)}
+                      className="px-3 py-1 bg-gray-600 rounded text-white text-sm"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* FOOTER BUTTONS */}
+            <div className="flex justify-between mt-6">
               <button
                 onClick={() => generateItemPDF(selectedItem)}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded"
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium"
               >
                 Download PDF
               </button>
@@ -476,27 +532,26 @@ export default function AdminDashboard() {
               <div className="flex gap-2">
                 <button
                   onClick={() => markAsClaimed(selectedItem.id)}
-                  className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded"
+                  className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium"
                 >
                   Mark Claimed
                 </button>
 
                 <button
                   onClick={() => deleteItem(selectedItem.id)}
-                  className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded"
+                  className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium"
                 >
                   Delete
                 </button>
 
                 <button
                   onClick={() => setShowModal(false)}
-                  className="px-4 py-2 bg-gray-500 hover:bg-gray-600 text-white rounded"
+                  className="px-4 py-2 bg-gray-500 hover:bg-gray-600 text-white rounded-lg font-medium"
                 >
                   Close
                 </button>
               </div>
             </div>
-
           </div>
         </div>
       )}
