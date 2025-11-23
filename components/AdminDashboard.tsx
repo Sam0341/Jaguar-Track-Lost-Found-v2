@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { addLog } from "@/lib/logs";
+import { generateItemPDF } from "@/components/pdf/ItemReportPDF";
 
 /* ============================================================
    TYPES
@@ -42,17 +43,15 @@ export default function AdminDashboard() {
 
   const [selectedItem, setSelectedItem] = useState<Item | null>(null);
   const [showModal, setShowModal] = useState(false);
-  const [reportOpen, setReportOpen] = useState(false);
 
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [campusFilter, setCampusFilter] = useState("All");
 
-  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
-
-  // Expiration Editing
   const [editingExpiration, setEditingExpiration] = useState(false);
   const [newExpiration, setNewExpiration] = useState("");
+
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
 
   /* ============================================================
      FETCH ITEMS
@@ -89,6 +88,7 @@ export default function AdminDashboard() {
     const itemsWithNames = await Promise.all(
       data.map(async (item: any) => {
         let handled_by_name = null;
+
         if (item.report?.handled_by) {
           const { data: p } = await supabase
             .from("profiles")
@@ -102,12 +102,7 @@ export default function AdminDashboard() {
           ...item,
           category_name: item.categories?.name,
           campus_name: item.campuses?.name,
-          report: item.report
-            ? {
-                ...item.report,
-                handled_by_name,
-              }
-            : null,
+          report: item.report ? { ...item.report, handled_by_name } : null,
         };
       })
     );
@@ -118,7 +113,7 @@ export default function AdminDashboard() {
   }
 
   /* ============================================================
-     FILTER
+     FILTERING
   ============================================================ */
   useEffect(() => {
     let filtered = [...items];
@@ -143,7 +138,7 @@ export default function AdminDashboard() {
      HELPERS
   ============================================================ */
 
-  const formatDate = (dateStr: string | null | undefined) => {
+  const formatDate = (dateStr?: string | null) => {
     if (!dateStr) return "—";
     return new Date(dateStr).toLocaleDateString("en-BZ", {
       month: "short",
@@ -152,19 +147,30 @@ export default function AdminDashboard() {
     });
   };
 
-  /** Days left calculation */
-  function getDaysLeft(exp?: string | null) {
-    if (!exp) return null;
+  const formatTime = (dateStr?: string | null) => {
+    if (!dateStr) return "—";
+    return new Date(dateStr).toLocaleTimeString("en-BZ", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  function getExpirationColor(exp?: string | null) {
+    if (!exp) return "text-gray-400";
+
     const today = new Date();
-    const target = new Date(exp);
-    const diff = target.getTime() - today.getTime();
-    return Math.ceil(diff / (1000 * 60 * 60 * 24));
+    const date = new Date(exp);
+    const diff = date.getTime() - today.getTime();
+    const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
+
+    if (days <= 0) return "text-red-600 font-semibold"; // expired
+    if (days <= 3) return "text-yellow-600 font-semibold"; // warning approaching
+    return "text-green-600 font-semibold"; // safe
   }
 
-  /** Toast */
   function showToast(msg: string, type: "success" | "error") {
     setToast({ message: msg, type });
-    setTimeout(() => setToast(null), 3500);
+    setTimeout(() => setToast(null), 3000);
   }
 
   /* ============================================================
@@ -186,34 +192,32 @@ export default function AdminDashboard() {
   }
 
   /* ============================================================
-     CLAIM & DELETE
+     CLAIM / DELETE
   ============================================================ */
   async function markAsClaimed(id: string) {
-    if (!confirm("Mark as claimed?")) return;
+    if (!confirm("Mark this item as claimed?")) return;
 
     const { data: auth } = await supabase.auth.getUser();
     const admin = auth?.user;
 
-    const { error } = await supabase.from("items").update({ status: "Claimed" }).eq("id", id);
-
-    if (error) return showToast("Error updating item", "error");
+    await supabase.from("items").update({ status: "Claimed" }).eq("id", id);
 
     await addLog("item_claimed", id, admin?.id || "unknown");
+
     fetchItems();
     setShowModal(false);
     showToast("Item marked as claimed!", "success");
   }
 
   async function deleteItem(id: string) {
-    if (!confirm("Delete this?")) return;
+    if (!confirm("Delete this item?")) return;
 
     const { data: auth } = await supabase.auth.getUser();
     const admin = auth?.user;
 
-    const { error } = await supabase.from("items").delete().eq("id", id);
-    if (error) return showToast("Delete failed", "error");
-
+    await supabase.from("items").delete().eq("id", id);
     await addLog("item_deleted", id, admin?.id || "unknown");
+
     fetchItems();
     setShowModal(false);
     showToast("Item deleted!", "success");
@@ -229,7 +233,7 @@ export default function AdminDashboard() {
      RENDER
   ============================================================ */
   return (
-    <div className="p-6 max-w-7xl mx-auto bg-gray-100 text-gray-900 dark:bg-gray-900 dark:text-gray-200 min-h-screen">
+    <div className="p-6 max-w-7xl mx-auto min-h-screen bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-200">
 
       {/* Toast */}
       {toast && (
@@ -259,12 +263,12 @@ export default function AdminDashboard() {
         <input
           type="text"
           placeholder="Search..."
+          className="px-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded flex-1"
           onChange={(e) => setSearchTerm(e.target.value)}
-          className="px-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded text-gray-900 dark:text-gray-200 flex-1"
         />
 
         <select
-          className="px-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded text-gray-900 dark:text-gray-200"
+          className="px-4 py-2 bg-white dark:bg-gray-800 border dark:border-gray-700 rounded"
           onChange={(e) => setStatusFilter(e.target.value)}
         >
           <option>All</option>
@@ -274,31 +278,27 @@ export default function AdminDashboard() {
         </select>
 
         <select
-          className="px-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded text-gray-900 dark:text-gray-200"
+          className="px-4 py-2 bg-white dark:bg-gray-800 border dark:border-gray-700 rounded"
           onChange={(e) => setCampusFilter(e.target.value)}
         >
           <option>All</option>
-          {Array.from(new Set(items.map((i) => i.campus_name))).map((campus) => (
-            <option key={campus}>{campus}</option>
+          {Array.from(new Set(items.map((i) => i.campus_name))).map((c) => (
+            <option key={c}>{c}</option>
           ))}
         </select>
       </div>
 
       {/* Table */}
-      {!loading && filteredItems.length === 0 && (
-        <p className="text-center text-gray-500">No items found.</p>
-      )}
-
       {!loading && filteredItems.length > 0 && (
         <div className="overflow-auto rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800">
           <table className="w-full text-sm">
-            <thead className="bg-gray-200 dark:bg-gray-800 text-gray-900 dark:text-gray-100">
+            <thead className="bg-gray-200 dark:bg-gray-800">
               <tr>
-                <th className="px-4 py-3 border-b dark:border-gray-700">Name</th>
-                <th className="px-4 py-3 border-b dark:border-gray-700">Category</th>
-                <th className="px-4 py-3 border-b dark:border-gray-700">Campus</th>
-                <th className="px-4 py-3 border-b dark:border-gray-700">Status</th>
-                <th className="px-4 py-3 border-b dark:border-gray-700 text-right">Actions</th>
+                <th className="px-4 py-3 border-b">Name</th>
+                <th className="px-4 py-3 border-b">Category</th>
+                <th className="px-4 py-3 border-b">Campus</th>
+                <th className="px-4 py-3 border-b">Status</th>
+                <th className="px-4 py-3 border-b text-right">Actions</th>
               </tr>
             </thead>
 
@@ -306,11 +306,10 @@ export default function AdminDashboard() {
               {filteredItems.map((item) => (
                 <tr
                   key={item.id}
-                  className="border-b border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
+                  className="border-b hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
                   onClick={() => {
                     setSelectedItem(item);
                     setEditingExpiration(false);
-                    setReportOpen(false);
                     setShowModal(true);
                   }}
                 >
@@ -333,13 +332,14 @@ export default function AdminDashboard() {
                   </td>
 
                   <td className="px-4 py-3 text-right">
-                    <button className="px-3 py-1 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 rounded text-gray-900 dark:text-gray-200">
+                    <button className="px-3 py-1 bg-gray-200 dark:bg-gray-700 rounded">
                       View
                     </button>
                   </td>
                 </tr>
               ))}
             </tbody>
+
           </table>
         </div>
       )}
@@ -349,11 +349,11 @@ export default function AdminDashboard() {
       ============================================================ */}
       {showModal && selectedItem && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-          <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl max-w-lg w-full p-6 relative shadow-2xl text-gray-900 dark:text-gray-100">
+          <div className="bg-white dark:bg-gray-900 border rounded-lg w-full max-w-md p-6 relative shadow-xl">
 
             <button
               onClick={() => setShowModal(false)}
-              className="absolute top-3 right-4 text-gray-500 dark:text-gray-300 hover:text-black"
+              className="absolute top-3 right-4 text-gray-500 hover:text-black"
             >
               ✕
             </button>
@@ -361,156 +361,139 @@ export default function AdminDashboard() {
             {selectedItem.image && (
               <img
                 src={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/item-photos/${selectedItem.image}`}
-                className="w-full h-56 object-cover rounded-lg mb-5 border border-gray-300 dark:border-gray-700"
+                className="w-full h-48 object-cover rounded-lg mb-4"
               />
             )}
 
-            <h2 className="text-2xl font-bold text-ubGold">{selectedItem.name}</h2>
+            <h2 className="text-xl font-bold text-ubGold">{selectedItem.name}</h2>
             <p className="text-gray-500 dark:text-gray-400 mb-4">
               {selectedItem.category_name} • {selectedItem.campus_name}
             </p>
 
-            {/* Info Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Item Info */}
+            <div className="bg-gray-100 dark:bg-gray-800 border rounded-lg p-4 mb-4">
+              <h3 className="font-semibold mb-2">Item Information</h3>
 
-              {/* Item Info */}
-              <div className="bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg p-4">
-                <h3 className="text-lg font-semibold mb-3">Item Information</h3>
+              <p className="text-sm">
+                <strong>Status:</strong>{" "}
+                <span
+                  className={`px-2 py-1 rounded text-xs text-white ${
+                    selectedItem.status === "Claimed"
+                      ? "bg-green-600"
+                      : selectedItem.status === "Lost"
+                      ? "bg-yellow-600"
+                      : "bg-blue-600"
+                  }`}
+                >
+                  {selectedItem.status}
+                </span>
+              </p>
+              <p className="text-sm mt-2"><strong>Drop-Off:</strong> {selectedItem.dropoff_location || "N/A"}</p>
+              <p className="text-sm"><strong>Storage:</strong> {selectedItem.location || "N/A"}</p>
+              <p className="text-sm"><strong>Reported:</strong> {formatDate(selectedItem.reported_at)}</p>
+              <p className="text-sm"><strong>Time:</strong> {formatTime(selectedItem.reported_at)}</p>
 
-                <p className="text-sm">
-                  <strong>Status:</strong>
-                  <span
-                    className={`ml-2 px-2 py-1 rounded text-xs text-white ${
-                      selectedItem.status === "Claimed"
-                        ? "bg-green-600"
-                        : selectedItem.status === "Lost"
-                        ? "bg-yellow-600"
-                        : "bg-blue-600"
-                    }`}
-                  >
-                    {selectedItem.status}
-                  </span>
-                </p>
-
-                <p className="text-sm mt-2"><strong>Drop-Off:</strong> {selectedItem.dropoff_location || "N/A"}</p>
-                <p className="text-sm mt-1"><strong>Storage:</strong> {selectedItem.location || "N/A"}</p>
-                <p className="text-sm mt-1"><strong>Reported:</strong> {formatDate(selectedItem.reported_at)}</p>
-
-                {selectedItem.description && (
-                  <p className="text-sm mt-2"><strong>Description:</strong> {selectedItem.description}</p>
-                )}
-              </div>
-
-              {/* Reporter Info */}
-              <div className="bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg p-4">
-                <h3 className="text-lg font-semibold mb-3">Reporter Information</h3>
-
-                <p className="text-sm"><strong>Name:</strong> {selectedItem.reporter_name || "Unknown"}</p>
-
-                <p className="text-sm mt-1">
-                  <strong>Email:</strong>{" "}
-                  <a href={`mailto:${selectedItem.reporter_email}`} className="text-blue-600 dark:text-blue-400 underline">
-                    {selectedItem.reporter_email || "N/A"}
-                  </a>
-                </p>
-              </div>
-
+              {selectedItem.description && (
+                <p className="mt-2 text-sm"><strong>Description:</strong> {selectedItem.description}</p>
+              )}
             </div>
 
-            {/* REPORT DETAILS */}
-            {selectedItem.report && (
-              <div className="mt-6">
+            {/* Reporter Info */}
+            <div className="bg-gray-100 dark:bg-gray-800 border rounded-lg p-4 mb-4">
+              <h3 className="font-semibold mb-2">Reporter Information</h3>
 
+              <p className="text-sm"><strong>Name:</strong> {selectedItem.reporter_name || "Unknown"}</p>
+
+              <p className="text-sm">
+                <strong>Email:</strong>{" "}
+                <a href={`mailto:${selectedItem.reporter_email}`} className="text-blue-500 underline">
+                  {selectedItem.reporter_email || "N/A"}
+                </a>
+              </p>
+            </div>
+
+            {/* Expiration */}
+            <div className="bg-gray-100 dark:bg-gray-800 border rounded-lg p-4 mb-4">
+              <h3 className="font-semibold mb-2">Expiration</h3>
+
+              {!editingExpiration ? (
+                <p className="text-sm flex items-center gap-2">
+                  <strong>Date:</strong>
+                  <span className={getExpirationColor(selectedItem.report?.expiration_date)}>
+                    {selectedItem.report?.expiration_date
+                      ? formatDate(selectedItem.report.expiration_date)
+                      : "—"}
+                  </span>
+
+                  <button
+                    onClick={() => {
+                      setEditingExpiration(true);
+                      setNewExpiration(
+                        selectedItem.report?.expiration_date
+                          ? selectedItem.report.expiration_date.split("T")[0]
+                          : ""
+                      );
+                    }}
+                    className="text-blue-500 underline text-sm"
+                  >
+                    Edit
+                  </button>
+                </p>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="date"
+                    value={newExpiration}
+                    onChange={(e) => setNewExpiration(e.target.value)}
+                    className="px-2 py-1 bg-gray-800 border border-gray-600 rounded text-white"
+                  />
+                  <button
+                    onClick={saveExpiration}
+                    className="px-3 py-1 bg-green-600 rounded text-white text-sm"
+                  >
+                    Save
+                  </button>
+                  <button
+                    onClick={() => setEditingExpiration(false)}
+                    className="px-3 py-1 bg-gray-600 rounded text-white text-sm"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* BUTTONS */}
+            <div className="flex justify-between mt-4">
+              <button
+                onClick={() => generateItemPDF(selectedItem)}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded"
+              >
+                Download PDF
+              </button>
+
+              <div className="flex gap-2">
                 <button
-                  className="w-full flex justify-between items-center bg-gray-200 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 p-3 rounded-lg"
-                  onClick={() => setReportOpen(!reportOpen)}
+                  onClick={() => markAsClaimed(selectedItem.id)}
+                  className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded"
                 >
-                  <span className="font-medium">📄 Report Details</span>
-                  <span className={`transition-transform ${reportOpen ? "rotate-90" : ""}`}>▶</span>
+                  Mark Claimed
                 </button>
 
-                {reportOpen && (
-                  <div className="mt-3 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg p-4 text-sm space-y-3">
+                <button
+                  onClick={() => deleteItem(selectedItem.id)}
+                  className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded"
+                >
+                  Delete
+                </button>
 
-                    <p><strong>Type:</strong> {selectedItem.report.report_type}</p>
-
-                    {/* ===== EXPIRATION EDITABLE ===== */}
-                    <div className="mt-2">
-  <strong>Expiration:</strong>{" "}
-
-  {!editingExpiration ? (
-    <span className="ml-1">
-      {selectedItem.report?.expiration_date
-        ? formatDate(selectedItem.report.expiration_date)
-        : "—"}
-      <button
-        onClick={() => {
-          setEditingExpiration(true);
-          setNewExpiration(
-            selectedItem.report?.expiration_date
-              ? selectedItem.report.expiration_date.split("T")[0]
-              : ""
-          );
-        }}
-        className="ml-3 text-blue-400 hover:text-blue-200 underline text-sm"
-      >
-        Edit
-      </button>
-    </span>
-  ) : (
-    <span className="ml-2 flex items-center gap-2">
-      <input
-        type="date"
-        value={newExpiration}
-        onChange={(e) => setNewExpiration(e.target.value)}
-        className="px-2 py-1 bg-gray-800 border border-gray-600 rounded text-white"
-      />
-      <button
-        onClick={saveExpiration}
-        className="px-3 py-1 bg-green-600 hover:bg-green-700 rounded text-white text-sm"
-      >
-        Save
-      </button>
-      <button
-        onClick={() => setEditingExpiration(false)}
-        className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-white text-sm"
-      >
-        Cancel
-      </button>
-    </span>
-  )}
-</div>
-
-                    <p><strong>Created:</strong> {formatDate(selectedItem.report.created_at)}</p>
-                    <p><strong>Handled By:</strong> {selectedItem.report.handled_by_name || "System"}</p>
-
-                  </div>
-                )}
+                <button
+                  onClick={() => setShowModal(false)}
+                  className="px-4 py-2 bg-gray-500 hover:bg-gray-600 text-white rounded"
+                >
+                  Close
+                </button>
               </div>
-            )}
-
-            {/* ACTION BUTTONS */}
-            <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-300 dark:border-gray-700">
-              <button
-                onClick={() => markAsClaimed(selectedItem.id)}
-                className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded text-white"
-              >
-                Mark as Claimed
-              </button>
-
-              <button
-                onClick={() => deleteItem(selectedItem.id)}
-                className="px-4 py-2 bg-red-600 hover:bg-red-700 rounded text-white"
-              >
-                Delete
-              </button>
-
-              <button
-                onClick={() => setShowModal(false)}
-                className="px-4 py-2 bg-gray-400 dark:bg-gray-700 hover:bg-gray-500 rounded text-black dark:text-white"
-              >
-                Close
-              </button>
             </div>
 
           </div>
