@@ -4,7 +4,9 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { addLog } from "@/lib/logs";
 
-/* ================== TYPES ================== */
+/* ============================================================
+   TYPES
+============================================================ */
 type Item = {
   id: string;
   name: string;
@@ -31,10 +33,10 @@ type Item = {
   } | null;
 };
 
-/* ==========================================================
-                    MAIN ADMIN DASHBOARD
-========================================================== */
 export default function AdminDashboard() {
+  /* ============================================================
+     STATE
+  ============================================================ */
   const [items, setItems] = useState<Item[]>([]);
   const [filteredItems, setFilteredItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
@@ -49,7 +51,13 @@ export default function AdminDashboard() {
 
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
 
-  /* ============= FETCH ITEMS ============= */
+  // EDITING EXPIRATION
+  const [editingExpiration, setEditingExpiration] = useState(false);
+  const [newExpiration, setNewExpiration] = useState("");
+
+  /* ============================================================
+     FETCH ITEMS
+  ============================================================ */
   useEffect(() => {
     fetchItems();
   }, []);
@@ -75,13 +83,13 @@ export default function AdminDashboard() {
       .order("reported_at", { ascending: false });
 
     if (error) {
-      console.error("Error loading items:", error);
+      console.error("Error:", error);
       setLoading(false);
       return;
     }
 
-    // Get admin names for handled_by
-    const joined = await Promise.all(
+    // Load handled_by names
+    const itemsWithHandledBy = await Promise.all(
       (data || []).map(async (item: any) => {
         let handled_by_name = null;
 
@@ -91,14 +99,13 @@ export default function AdminDashboard() {
             .select("full_name")
             .eq("id", item.report.handled_by)
             .single();
-
           handled_by_name = handler?.full_name || "Unknown Admin";
         }
 
         return {
           ...item,
-          category_name: item.categories?.name || "Unknown",
-          campus_name: item.campuses?.name || "Unknown",
+          category_name: item.categories?.name,
+          campus_name: item.campuses?.name,
           report: item.report
             ? {
                 ...item.report,
@@ -109,21 +116,23 @@ export default function AdminDashboard() {
       })
     );
 
-    setItems(joined);
-    setFilteredItems(joined);
+    setItems(itemsWithHandledBy);
+    setFilteredItems(itemsWithHandledBy);
     setLoading(false);
   }
 
-  /* ============= FILTERING ============= */
+  /* ============================================================
+     FILTERING
+  ============================================================ */
   useEffect(() => {
-    let result = [...items];
+    let filtered = [...items];
 
-    if (statusFilter !== "All") result = result.filter((i) => i.status === statusFilter);
-    if (campusFilter !== "All") result = result.filter((i) => i.campus_name === campusFilter);
+    if (statusFilter !== "All") filtered = filtered.filter((i) => i.status === statusFilter);
+    if (campusFilter !== "All") filtered = filtered.filter((i) => i.campus_name === campusFilter);
 
     if (searchTerm.trim()) {
       const t = searchTerm.toLowerCase();
-      result = result.filter(
+      filtered = filtered.filter(
         (i) =>
           i.name.toLowerCase().includes(t) ||
           (i.reporter_name || "").toLowerCase().includes(t) ||
@@ -131,18 +140,49 @@ export default function AdminDashboard() {
       );
     }
 
-    setFilteredItems(result);
+    setFilteredItems(filtered);
   }, [items, searchTerm, statusFilter, campusFilter]);
 
+  /* ============================================================
+     HELPERS
+  ============================================================ */
   const formatDate = (d?: string | null) =>
     d ? new Date(d).toLocaleDateString("en-BZ", { month: "short", day: "numeric", year: "numeric" }) : "—";
 
-  /* ============= ACTIONS ============= */
+  function showToast(msg: string, type: "success" | "error") {
+    setToast({ message: msg, type });
+    setTimeout(() => setToast(null), 3500);
+  }
+
+  /* ============================================================
+     SAVE EXPIRATION DATE
+  ============================================================ */
+  async function saveExpiration() {
+    if (!selectedItem?.report) return;
+    if (!newExpiration) return showToast("Please pick a valid date.", "error");
+
+    const { error } = await supabase
+      .from("reports")
+      .update({ expiration_date: newExpiration })
+      .eq("item_id", selectedItem.id);
+
+    if (!error) {
+      showToast("Expiration date updated!", "success");
+      setEditingExpiration(false);
+      fetchItems();
+    } else {
+      showToast("Failed to update expiration.", "error");
+    }
+  }
+
+  /* ============================================================
+     MARK AS CLAIMED / DELETE
+  ============================================================ */
   async function markAsClaimed(id: string) {
     if (!confirm("Mark this item as claimed?")) return;
 
-    const { data: auth } = await supabase.auth.getUser();
-    const admin = auth?.user;
+    const { data: authData } = await supabase.auth.getUser();
+    const admin = authData?.user;
 
     const { error } = await supabase.from("items").update({ status: "Claimed" }).eq("id", id);
 
@@ -157,8 +197,8 @@ export default function AdminDashboard() {
   async function deleteItem(id: string) {
     if (!confirm("Delete this item?")) return;
 
-    const { data: auth } = await supabase.auth.getUser();
-    const admin = auth?.user;
+    const { data: authData } = await supabase.auth.getUser();
+    const admin = authData?.user;
 
     const { error } = await supabase.from("items").delete().eq("id", id);
 
@@ -170,18 +210,15 @@ export default function AdminDashboard() {
     } else showToast("Delete failed", "error");
   }
 
-  function showToast(message: string, type: "success" | "error") {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 3000);
-  }
-
-  /* ============= COUNTS ============= */
+  /* ============================================================
+     TOP COUNTS
+  ============================================================ */
   const uniqueStorageRooms = Array.from(new Set(items.map((i) => i.location).filter(Boolean))).length;
   const uniqueCampuses = Array.from(new Set(items.map((i) => i.campus_name))).length;
 
-  /* ==========================================================
-                        RENDER
-  ========================================================== */
+  /* ============================================================
+     RENDER
+  ============================================================ */
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <h1 className="text-3xl font-bold text-ubGold mb-6">Admin Dashboard</h1>
@@ -196,7 +233,7 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {/* ======= STATS ======= */}
+      {/* ===== STATS ===== */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
         <StatCard label="Total Items" value={items.length} />
         <StatCard label="Lost" value={items.filter((i) => i.status === "Lost").length} />
@@ -206,9 +243,10 @@ export default function AdminDashboard() {
         <StatCard label="Storage Rooms" value={uniqueStorageRooms} />
       </div>
 
-      {/* ======= FILTERS ======= */}
+      {/* FILTERS */}
       <div className="flex flex-wrap gap-3 mb-6">
         <input
+          type="text"
           className="px-4 py-2 bg-gray-800 border border-gray-700 rounded text-white flex-1"
           placeholder="Search by name or reporter..."
           onChange={(e) => setSearchTerm(e.target.value)}
@@ -235,7 +273,7 @@ export default function AdminDashboard() {
         </select>
       </div>
 
-      {/* ======= TABLE ======= */}
+      {/* TABLE */}
       {!loading && filteredItems.length === 0 && (
         <p className="text-center text-gray-400">No items found.</p>
       )}
@@ -261,12 +299,14 @@ export default function AdminDashboard() {
                   onClick={() => {
                     setSelectedItem(item);
                     setReportOpen(false);
+                    setEditingExpiration(false);
                     setShowModal(true);
                   }}
                 >
                   <td className="px-4 py-3 text-ubGold">{item.name}</td>
                   <td className="px-4 py-3">{item.category_name}</td>
                   <td className="px-4 py-3">{item.campus_name}</td>
+
                   <td className="px-4 py-3">
                     <span
                       className={`px-3 py-1 rounded-full text-xs ${
@@ -280,8 +320,11 @@ export default function AdminDashboard() {
                       {item.status}
                     </span>
                   </td>
+
                   <td className="px-4 py-3 text-right">
-                    <button className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-white">View</button>
+                    <button className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-white">
+                      View
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -290,14 +333,12 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {/* ==========================================================
-                          MODAL
-      ========================================================== */}
+      {/* ===================== MODAL ===================== */}
       {showModal && selectedItem && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-          <div className="bg-gray-900 border border-gray-700 rounded-2xl max-w-lg w-full p-6 relative shadow-2xl">
+          <div className="bg-gray-900 border border-gray-700 rounded-xl max-w-lg w-full p-6 relative shadow-2xl">
 
-            {/* Close */}
+            {/* CLOSE BUTTON */}
             <button
               onClick={() => setShowModal(false)}
               className="absolute top-3 right-4 text-gray-400 text-xl hover:text-white"
@@ -305,24 +346,24 @@ export default function AdminDashboard() {
               ✕
             </button>
 
-            {/* Image */}
+            {/* IMAGE */}
             {selectedItem.image && (
               <img
                 src={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/item-photos/${selectedItem.image}`}
-                className="w-full h-60 object-cover rounded-lg mb-5 border border-gray-700"
+                className="w-full h-56 object-cover rounded-lg mb-5 border border-gray-700"
               />
             )}
 
-            {/* Title */}
-            <h2 className="text-2xl font-bold text-ubGold">{selectedItem.name}</h2>
-            <p className="text-gray-400 text-sm mb-4">
+            {/* TITLE */}
+            <h2 className="text-2xl font-bold text-ubGold mb-1">{selectedItem.name}</h2>
+            <p className="text-gray-400 mb-4 text-sm">
               {selectedItem.category_name} • {selectedItem.campus_name}
             </p>
 
-            {/* Info Cards */}
+            {/* INFO GRID */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
-              {/* Item Info */}
+              {/* ITEM INFO */}
               <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
                 <h3 className="text-lg font-semibold text-white mb-3">Item Information</h3>
 
@@ -352,7 +393,7 @@ export default function AdminDashboard() {
                 )}
               </div>
 
-              {/* Reporter Info */}
+              {/* REPORTER INFO */}
               <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
                 <h3 className="text-lg font-semibold text-white mb-3">Reporter Information</h3>
 
@@ -368,7 +409,7 @@ export default function AdminDashboard() {
 
             </div>
 
-            {/* Report Details */}
+            {/* REPORT DETAILS */}
             {selectedItem.report && (
               <div className="mt-6">
                 <button
@@ -380,12 +421,56 @@ export default function AdminDashboard() {
                 </button>
 
                 {reportOpen && (
-                  <div className="mt-3 bg-gray-800 border border-gray-700 rounded-lg p-4 text-sm space-y-2">
+                  <div className="mt-3 bg-gray-800 border border-gray-700 rounded-lg p-4 text-sm space-y-3">
 
                     <p><strong>Type:</strong> {selectedItem.report.report_type}</p>
 
-                    {/* Expiration Badge */}
-                    <ExpirationSection report={selectedItem.report} />
+                    {/* ==================== EXPIRATION EDITABLE ==================== */}
+                    <div className="mt-2">
+  <strong>Expiration:</strong>{" "}
+
+  {!editingExpiration ? (
+    <span className="ml-1">
+      {selectedItem.report?.expiration_date
+        ? formatDate(selectedItem.report.expiration_date)
+        : "—"}
+      <button
+        onClick={() => {
+          setEditingExpiration(true);
+          setNewExpiration(
+            selectedItem.report?.expiration_date
+              ? selectedItem.report.expiration_date.split("T")[0]
+              : ""
+          );
+        }}
+        className="ml-3 text-blue-400 hover:text-blue-200 underline text-sm"
+      >
+        Edit
+      </button>
+    </span>
+  ) : (
+    <span className="ml-2 flex items-center gap-2">
+      <input
+        type="date"
+        value={newExpiration}
+        onChange={(e) => setNewExpiration(e.target.value)}
+        className="px-2 py-1 bg-gray-800 border border-gray-600 rounded text-white"
+      />
+      <button
+        onClick={saveExpiration}
+        className="px-3 py-1 bg-green-600 hover:bg-green-700 rounded text-white text-sm"
+      >
+        Save
+      </button>
+      <button
+        onClick={() => setEditingExpiration(false)}
+        className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-white text-sm"
+      >
+        Cancel
+      </button>
+    </span>
+  )}
+</div>
 
                     <p><strong>Created:</strong> {formatDate(selectedItem.report.created_at)}</p>
                     <p><strong>Handled By:</strong> {selectedItem.report.handled_by_name || "System"}</p>
@@ -395,7 +480,7 @@ export default function AdminDashboard() {
               </div>
             )}
 
-            {/* Actions */}
+            {/* BUTTONS */}
             <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-700">
               <button
                 onClick={() => markAsClaimed(selectedItem.id)}
@@ -426,46 +511,14 @@ export default function AdminDashboard() {
   );
 }
 
-/* ==========================================================
-        STAT CARD
-========================================================== */
+/* ============================================================
+   STAT CARD COMPONENT
+============================================================ */
 function StatCard({ label, value }: { label: string; value: number }) {
   return (
     <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 text-center">
       <p className="text-3xl font-bold text-ubGold">{value}</p>
       <p className="text-gray-400 text-sm mt-1">{label}</p>
     </div>
-  );
-}
-
-/* ==========================================================
-        EXPIRATION BADGE COMPONENT
-========================================================== */
-function ExpirationSection({ report }: any) {
-  if (!report?.expiration_date) {
-    return <p><strong>Expiration:</strong> —</p>;
-  }
-
-  const exp = new Date(report.expiration_date).getTime();
-  const now = Date.now();
-  const daysLeft = Math.ceil((exp - now) / (1000 * 60 * 60 * 24));
-
-  let color = "bg-blue-600";
-  let label = `${daysLeft} days left`;
-
-  if (daysLeft <= 30) color = "bg-yellow-600";
-  if (daysLeft <= 7) color = "bg-red-600";
-  if (daysLeft <= 0) {
-    color = "bg-red-700";
-    label = "Expired";
-  }
-
-  return (
-    <p>
-      <strong>Expiration:</strong> {new Date(report.expiration_date).toLocaleDateString()}
-      <span className={`ml-2 px-2 py-1 rounded text-xs text-white ${color}`}>
-        {label}
-      </span>
-    </p>
   );
 }
