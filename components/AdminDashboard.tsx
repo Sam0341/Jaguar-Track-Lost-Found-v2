@@ -2,177 +2,200 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
-import { addLog } from "@/lib/logs"; // ✅ log helper
+import { addLog } from "@/lib/logs";
 
 type Item = {
   id: string;
   name: string;
   status: string;
-  campus: string;
   description?: string;
   image?: string;
   reporter_name?: string;
   reporter_email?: string;
   reported_at?: string;
+  dropoff_location?: string;
+  location?: string;
+
+  // joined
+  category_name?: string;
+  campus_name?: string;
+
+  // joined report details
+  report?: {
+    report_type: string;
+    description: string;
+    storage_location: string;
+    expiration_date: string | null;
+    created_at: string;
+    handled_by: string | null;
+    handled_by_name?: string | null;
+  } | null;
 };
 
 export default function AdminDashboard() {
   const [items, setItems] = useState<Item[]>([]);
   const [filteredItems, setFilteredItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
+
   const [selectedItem, setSelectedItem] = useState<Item | null>(null);
   const [showModal, setShowModal] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false); // expand/collapse
+
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [campusFilter, setCampusFilter] = useState("All");
-  const [toast, setToast] = useState<{
-    message: string;
-    type: "success" | "error";
-  } | null>(null);
+
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
 
   useEffect(() => {
     fetchItems();
   }, []);
 
-  // 🧠 Fetch all items
   async function fetchItems() {
     setLoading(true);
+
     const { data, error } = await supabase
       .from("items")
-      .select("*")
+      .select(`
+        *,
+        categories:category_id ( name ),
+        campuses:campus_id ( name ),
+        report:reports (
+          report_type,
+          description,
+          storage_location,
+          expiration_date,
+          created_at,
+          handled_by
+        )
+      `)
       .order("reported_at", { ascending: false });
 
     if (error) {
-      console.error("Error fetching items:", error);
-    } else {
-      setItems(data || []);
-      setFilteredItems(data || []);
+      console.error("Error:", error);
+      setLoading(false);
+      return;
     }
+
+    // Load handled_by admin names
+    const itemsWithHandledBy = await Promise.all(
+      (data || []).map(async (item: any) => {
+        let handled_by_name = null;
+
+        if (item.report?.handled_by) {
+          const { data: handler } = await supabase
+            .from("profiles")
+            .select("full_name")
+            .eq("id", item.report.handled_by)
+            .single();
+
+          handled_by_name = handler?.full_name || "Unknown Admin";
+        }
+
+        return {
+          ...item,
+          category_name: item.categories?.name || "Unknown",
+          campus_name: item.campuses?.name || "Unknown",
+          report: item.report
+            ? {
+                ...item.report,
+                handled_by_name,
+              }
+            : null,
+        };
+      })
+    );
+
+    setItems(itemsWithHandledBy);
+    setFilteredItems(itemsWithHandledBy);
     setLoading(false);
   }
 
-  // 🔍 Filter + Search
   useEffect(() => {
     let filtered = [...items];
 
-    if (statusFilter !== "All") {
-      filtered = filtered.filter((item) => item.status === statusFilter);
-    }
+    if (statusFilter !== "All") filtered = filtered.filter((item) => item.status === statusFilter);
+    if (campusFilter !== "All") filtered = filtered.filter((item) => item.campus_name === campusFilter);
 
-    if (campusFilter !== "All") {
-      filtered = filtered.filter((item) => item.campus === campusFilter);
-    }
-
-    if (searchTerm.trim() !== "") {
-      const term = searchTerm.toLowerCase();
+    if (searchTerm.trim()) {
+      const t = searchTerm.toLowerCase();
       filtered = filtered.filter(
-        (item) =>
-          item.name.toLowerCase().includes(term) ||
-          (item.reporter_name?.toLowerCase() || "").includes(term) ||
-          (item.reporter_email?.toLowerCase() || "").includes(term)
+        (i) =>
+          i.name.toLowerCase().includes(t) ||
+          (i.reporter_name || "").toLowerCase().includes(t) ||
+          (i.reporter_email || "").toLowerCase().includes(t)
       );
     }
 
     setFilteredItems(filtered);
-  }, [searchTerm, statusFilter, campusFilter, items]);
+  }, [items, searchTerm, statusFilter, campusFilter]);
 
-  const formatDate = (date?: string) =>
-    date
-      ? new Date(date).toLocaleDateString("en-BZ", {
-          year: "numeric",
-          month: "short",
-          day: "numeric",
-        })
-      : "—";
+  const formatDate = (d?: string | null) =>
+    d ? new Date(d).toLocaleDateString("en-BZ", { month: "short", day: "numeric", year: "numeric" }) : "—";
 
-  // 🟢 Mark as Claimed + log
-  async function markAsClaimed(itemId: string) {
-    const confirmed = window.confirm("Mark this item as claimed?");
-    if (!confirmed) return;
+  async function markAsClaimed(id: string) {
+    if (!confirm("Mark this item as claimed?")) return;
 
-    // who did it?
     const { data: authData } = await supabase.auth.getUser();
     const admin = authData?.user;
 
-    const { error } = await supabase
-      .from("items")
-      .update({ status: "Claimed" })
-      .eq("id", itemId);
+    const { error } = await supabase.from("items").update({ status: "Claimed" }).eq("id", id);
 
-    if (error) {
-      showToast("Failed to update item", "error");
-    } else {
-      // 🔥 write log entry
-      await addLog("item_claimed", itemId, admin?.id || "unknown");
-
-      showToast("✅ Item marked as claimed!", "success");
+    if (!error) {
+      await addLog("item_claimed", id, admin?.id || "unknown");
+      showToast("Item marked as claimed!", "success");
       setShowModal(false);
       fetchItems();
-    }
+    } else showToast("Error updating item", "error");
   }
 
-  // 🔴 Delete item + log
-  async function deleteItem(itemId: string) {
-    const confirmed = window.confirm(
-      "Are you sure you want to delete this item?"
-    );
-    if (!confirmed) return;
+  async function deleteItem(id: string) {
+    if (!confirm("Delete this item?")) return;
 
-    // who did it?
     const { data: authData } = await supabase.auth.getUser();
     const admin = authData?.user;
 
-    const { error } = await supabase.from("items").delete().eq("id", itemId);
+    const { error } = await supabase.from("items").delete().eq("id", id);
 
-    if (error) {
-      showToast("❌ Failed to delete item", "error");
-    } else {
-      // 🔥 write log entry
-      await addLog("item_deleted", itemId, admin?.id || "unknown");
-
-      showToast("🗑️ Item deleted successfully!", "success");
+    if (!error) {
+      await addLog("item_deleted", id, admin?.id || "unknown");
+      showToast("Item deleted!", "success");
       setShowModal(false);
       fetchItems();
-    }
+    } else showToast("Delete failed", "error");
   }
 
-  // 🌈 Toast message
-  function showToast(message: string, type: "success" | "error") {
-    setToast({ message, type });
+  function showToast(msg: string, type: "success" | "error") {
+    setToast({ message: msg, type });
     setTimeout(() => setToast(null), 3500);
   }
 
   return (
-    <div className="p-4 sm:p-6 max-w-7xl mx-auto relative">
-      <h1 className="text-3xl font-bold text-ubGold mb-6 text-center sm:text-left">
-        Admin Dashboard
-      </h1>
+    <div className="p-6 max-w-7xl mx-auto">
+      <h1 className="text-3xl font-bold text-ubGold mb-6">Admin Dashboard</h1>
 
-      {/* Toast Notification */}
       {toast && (
         <div
-          className={`fixed top-5 right-5 z-50 px-5 py-3 rounded-lg shadow-lg text-white ${
+          className={`fixed top-5 right-5 px-4 py-2 rounded shadow-lg text-white ${
             toast.type === "success" ? "bg-green-600" : "bg-red-600"
-          } animate-fade-in`}
+          }`}
         >
           {toast.message}
         </div>
       )}
 
-      {/* Filters + Search */}
-      <div className="flex flex-col sm:flex-row gap-3 mb-6">
+      {/* Filters */}
+      <div className="flex flex-wrap gap-3 mb-6">
         <input
           type="text"
+          className="px-4 py-2 bg-gray-800 border border-gray-700 rounded text-white flex-1"
           placeholder="Search by name or reporter..."
-          value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          className="flex-1 px-4 py-2 rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 outline-none focus:ring-2 focus:ring-ubGold"
         />
 
         <select
-          value={statusFilter}
+          className="px-4 py-2 bg-gray-800 border border-gray-700 rounded text-white"
           onChange={(e) => setStatusFilter(e.target.value)}
-          className="px-4 py-2 rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200"
         >
           <option>All</option>
           <option>Lost</option>
@@ -181,193 +204,206 @@ export default function AdminDashboard() {
         </select>
 
         <select
-          value={campusFilter}
+          className="px-4 py-2 bg-gray-800 border border-gray-700 rounded text-white"
           onChange={(e) => setCampusFilter(e.target.value)}
-          className="px-4 py-2 rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200"
         >
           <option>All</option>
-          <option>Belmopan (Central Campus)</option>
-          <option>Central Farm</option>
-          <option>Punta Gorda</option>
-          <option>Belize City Campus</option>
+          {Array.from(new Set(items.map((i) => i.campus_name))).map((campus) => (
+            <option key={campus}>{campus}</option>
+          ))}
         </select>
       </div>
 
-      {/* Responsive Table / Cards */}
-      {loading ? (
-        <p className="text-gray-500 text-center">Loading items...</p>
-      ) : filteredItems.length === 0 ? (
-        <p className="text-gray-400 text-center">
-          No items match your search.
-        </p>
-      ) : (
-        <>
-          {/* Desktop Table */}
-          <div className="hidden sm:block overflow-x-auto bg-white dark:bg-gray-800 rounded-lg shadow-md">
-            <table className="w-full text-sm text-left">
-              <thead className="bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200">
-                <tr>
-                  <th className="px-4 py-3">Name</th>
-                  <th className="px-4 py-3">Campus</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3">Reporter</th>
-                  <th className="px-4 py-3">Reported At</th>
-                  <th className="px-4 py-3 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredItems.map((item) => (
-                  <tr
-                    key={item.id}
-                    className="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer"
-                    onClick={() => {
-                      setSelectedItem(item);
-                      setShowModal(true);
-                    }}
-                  >
-                    <td className="px-4 py-3 font-medium text-ubGold">
-                      {item.name}
-                    </td>
-                    <td className="px-4 py-3">{item.campus}</td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                          item.status === "Claimed"
-                            ? "bg-green-600 text-white"
-                            : item.status === "Lost"
-                            ? "bg-yellow-500 text-white"
-                            : "bg-blue-600 text-white"
-                        }`}
-                      >
-                        {item.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      {item.reporter_name || "Unknown"}
-                    </td>
-                    <td className="px-4 py-3">{formatDate(item.reported_at)}</td>
-                    <td className="px-4 py-3 text-right">
-                      <button
-                        className="px-3 py-1 rounded-md bg-gray-700 text-white hover:bg-gray-600"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedItem(item);
-                          setShowModal(true);
-                        }}
-                      >
-                        View
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Mobile Cards */}
-          <div className="sm:hidden space-y-4">
-            {filteredItems.map((item) => (
-              <div
-                key={item.id}
-                onClick={() => {
-                  setSelectedItem(item);
-                  setShowModal(true);
-                }}
-                className="bg-white dark:bg-gray-800 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 p-4"
-              >
-                <div className="flex justify-between items-center">
-                  <h3 className="text-lg font-semibold text-ubGold">
-                    {item.name}
-                  </h3>
-                  <span
-                    className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                      item.status === "Claimed"
-                        ? "bg-green-600 text-white"
-                        : item.status === "Lost"
-                        ? "bg-yellow-500 text-white"
-                        : "bg-blue-600 text-white"
-                    }`}
-                  >
-                    {item.status}
-                  </span>
-                </div>
-                <p className="text-sm text-gray-400 mt-1">{item.campus}</p>
-                <p className="text-sm mt-1">
-                  Reporter:{" "}
-                  <span className="text-gray-300">
-                    {item.reporter_name || "Unknown"}
-                  </span>
-                </p>
-                <p className="text-xs text-gray-400 mt-2">
-                  {formatDate(item.reported_at)}
-                </p>
-              </div>
-            ))}
-          </div>
-        </>
+      {/* Table */}
+      {!loading && filteredItems.length === 0 && (
+        <p className="text-center text-gray-400">No items found.</p>
       )}
 
-      {/* 🪟 ITEM DETAILS MODAL */}
+      {!loading && filteredItems.length > 0 && (
+        <div className="overflow-auto rounded border border-gray-700">
+          <table className="w-full text-sm text-gray-300">
+            <thead className="bg-gray-800 text-gray-200">
+              <tr>
+                <th className="px-4 py-3">Name</th>
+                <th className="px-4 py-3">Category</th>
+                <th className="px-4 py-3">Campus</th>
+                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3 text-right">Actions</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {filteredItems.map((item) => (
+                <tr
+                  key={item.id}
+                  className="border-b border-gray-700 hover:bg-gray-800 cursor-pointer"
+                  onClick={() => {
+                    setSelectedItem(item);
+                    setReportOpen(false);
+                    setShowModal(true);
+                  }}
+                >
+                  <td className="px-4 py-3 text-ubGold">{item.name}</td>
+                  <td className="px-4 py-3">{item.category_name}</td>
+                  <td className="px-4 py-3">{item.campus_name}</td>
+
+                  <td className="px-4 py-3">
+                    <span
+                      className={`px-3 py-1 rounded-full text-xs ${
+                        item.status === "Claimed"
+                          ? "bg-green-600"
+                          : item.status === "Lost"
+                          ? "bg-yellow-600"
+                          : "bg-blue-600"
+                      }`}
+                    >
+                      {item.status}
+                    </span>
+                  </td>
+
+                  <td className="px-4 py-3 text-right">
+                    <button className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-white">
+                      View
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* MODAL */}
       {showModal && selectedItem && (
-        <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-50 px-4">
-          <div className="bg-gray-900 text-white rounded-lg max-w-lg w-full shadow-lg border border-gray-700 p-6 relative animate-fade-in">
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+          <div className="bg-gray-900 border border-gray-700 rounded-lg max-w-lg w-full p-6 relative">
             <button
               onClick={() => setShowModal(false)}
-              className="absolute top-3 right-4 text-gray-400 hover:text-white text-xl"
+              className="absolute top-3 right-4 text-gray-400 text-xl hover:text-white"
             >
               ✕
             </button>
 
+            {/* IMAGE */}
             {selectedItem.image && (
               <img
                 src={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/item-photos/${selectedItem.image}`}
-                alt={selectedItem.name}
-                className="w-full h-56 object-cover rounded-lg mb-4 border border-gray-700"
+                className="w-full h-56 object-cover rounded mb-4"
               />
             )}
 
-            <h2 className="text-2xl font-semibold text-ubGold mb-2">
-              {selectedItem.name}
-            </h2>
-            <p className="text-sm text-gray-400 mb-1">
-              <strong>Campus:</strong> {selectedItem.campus}
+            {/* BASIC INFO */}
+            <h2 className="text-2xl font-bold text-ubGold mb-2">{selectedItem.name}</h2>
+
+            <p className="text-gray-300 text-sm">
+              <strong>Category:</strong> {selectedItem.category_name}
             </p>
-            <p className="text-sm text-gray-400 mb-1">
+
+            <p className="text-gray-300 text-sm">
+              <strong>Campus:</strong> {selectedItem.campus_name}
+            </p>
+
+            <p className="text-gray-300 text-sm">
               <strong>Status:</strong> {selectedItem.status}
             </p>
-            <p className="text-sm text-gray-400 mb-1">
-              <strong>Reporter:</strong>{" "}
-              {selectedItem.reporter_name || "Unknown"}
+
+            <p className="text-gray-300 text-sm">
+              <strong>Drop-Off:</strong> {selectedItem.dropoff_location || "N/A"}
             </p>
-            <p className="text-sm text-gray-400 mb-1">
+
+            <p className="text-gray-300 text-sm">
+              <strong>Current Storage:</strong> {selectedItem.location || "N/A"}
+            </p>
+
+            <p className="text-gray-300 text-sm">
+              <strong>Reporter:</strong> {selectedItem.reporter_name || "Unknown"}
+            </p>
+
+            <p className="text-gray-300 text-sm">
               <strong>Email:</strong> {selectedItem.reporter_email || "N/A"}
             </p>
-            <p className="text-sm text-gray-400 mb-1">
-              <strong>Reported At:</strong>{" "}
-              {formatDate(selectedItem.reported_at)}
+
+            <p className="text-gray-300 text-sm">
+              <strong>Reported At:</strong> {formatDate(selectedItem.reported_at)}
             </p>
+
             {selectedItem.description && (
-              <p className="text-sm text-gray-300 mt-2 border-t border-gray-700 pt-2">
+              <p className="text-gray-300 text-sm mt-2">
                 <strong>Description:</strong> {selectedItem.description}
               </p>
             )}
 
-            <div className="flex flex-wrap justify-end gap-3 mt-5">
+            {/* REPORT DETAILS SECTION */}
+            {selectedItem.report && (
+              <div className="mt-5">
+                <button
+                  className="w-full px-4 py-2 flex justify-between items-center bg-gray-800 border border-gray-700 rounded"
+                  onClick={() => setReportOpen(!reportOpen)}
+                >
+                  <span>📄 Report Details</span>
+                  <span
+                    className={`transition-transform ${
+                      reportOpen ? "rotate-90" : ""
+                    }`}
+                  >
+                    ▶
+                  </span>
+                </button>
+
+                {reportOpen && (
+                  <div className="mt-3 p-3 bg-gray-800 border border-gray-700 rounded text-sm space-y-2">
+                    <p>
+                      <strong>Report Type:</strong> {selectedItem.report.report_type}
+                    </p>
+
+                    <p>
+                      <strong>Description:</strong>{" "}
+                      {selectedItem.report.description || "N/A"}
+                    </p>
+
+                    <p>
+                      <strong>Storage Location:</strong>{" "}
+                      {selectedItem.report.storage_location || "N/A"}
+                    </p>
+
+                    <p>
+                      <strong>Expiration:</strong>{" "}
+                      {formatDate(selectedItem.report.expiration_date)}
+                    </p>
+
+                    <p>
+                      <strong>Created At:</strong>{" "}
+                      {formatDate(selectedItem.report.created_at)}
+                    </p>
+
+                    <p>
+                      <strong>Handled By:</strong>{" "}
+                      {selectedItem.report.handled_by_name || "System"}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ACTIONS */}
+            <div className="flex justify-end gap-3 mt-5">
               <button
                 onClick={() => markAsClaimed(selectedItem.id)}
-                className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg text-white"
+                className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded text-white"
               >
                 Mark as Claimed
               </button>
+
               <button
                 onClick={() => deleteItem(selectedItem.id)}
-                className="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg text-white"
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 rounded text-white"
               >
                 Delete
               </button>
+
               <button
                 onClick={() => setShowModal(false)}
-                className="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg text-white"
+                className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-white"
               >
                 Close
               </button>
