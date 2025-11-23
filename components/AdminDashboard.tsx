@@ -34,7 +34,7 @@ type Item = {
 };
 
 /* ============================================================
-   COMPONENT
+   DASHBOARD COMPONENT
 ============================================================ */
 export default function AdminDashboard() {
   const [items, setItems] = useState<Item[]>([]);
@@ -137,7 +137,6 @@ export default function AdminDashboard() {
   /* ============================================================
      HELPERS
   ============================================================ */
-
   const formatDate = (dateStr?: string | null) => {
     if (!dateStr) return "—";
     return new Date(dateStr).toLocaleDateString("en-BZ", {
@@ -164,13 +163,13 @@ export default function AdminDashboard() {
     const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
 
     if (days <= 0) return "text-red-600 font-semibold"; // expired
-    if (days <= 3) return "text-yellow-600 font-semibold"; // warning approaching
+    if (days <= 3) return "text-yellow-600 font-semibold"; // warning
     return "text-green-600 font-semibold"; // safe
   }
 
   function showToast(msg: string, type: "success" | "error") {
     setToast({ message: msg, type });
-    setTimeout(() => setToast(null), 3000);
+    setTimeout(() => setToast(null), 2500);
   }
 
   /* ============================================================
@@ -201,7 +200,6 @@ export default function AdminDashboard() {
     const admin = auth?.user;
 
     await supabase.from("items").update({ status: "Claimed" }).eq("id", id);
-
     await addLog("item_claimed", id, admin?.id || "unknown");
 
     fetchItems();
@@ -233,7 +231,7 @@ export default function AdminDashboard() {
      RENDER
   ============================================================ */
   return (
-    <div className="p-6 max-w-7xl mx-auto min-h-screen bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-200">
+    <div className="p-6 max-w-7xl mx-auto min-h-screen bg-gray-100 dark:bg-gray-900">
 
       {/* Toast */}
       {toast && (
@@ -263,12 +261,12 @@ export default function AdminDashboard() {
         <input
           type="text"
           placeholder="Search..."
-          className="px-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded flex-1"
+          className="px-4 py-2 bg-white dark:bg-gray-800 border rounded flex-1"
           onChange={(e) => setSearchTerm(e.target.value)}
         />
 
         <select
-          className="px-4 py-2 bg-white dark:bg-gray-800 border dark:border-gray-700 rounded"
+          className="px-4 py-2 bg-white dark:bg-gray-800 border rounded"
           onChange={(e) => setStatusFilter(e.target.value)}
         >
           <option>All</option>
@@ -278,7 +276,7 @@ export default function AdminDashboard() {
         </select>
 
         <select
-          className="px-4 py-2 bg-white dark:bg-gray-800 border dark:border-gray-700 rounded"
+          className="px-4 py-2 bg-white dark:bg-gray-800 border rounded"
           onChange={(e) => setCampusFilter(e.target.value)}
         >
           <option>All</option>
@@ -290,7 +288,7 @@ export default function AdminDashboard() {
 
       {/* Table */}
       {!loading && filteredItems.length > 0 && (
-        <div className="overflow-auto rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800">
+        <div className="overflow-auto rounded border bg-white dark:bg-gray-800">
           <table className="w-full text-sm">
             <thead className="bg-gray-200 dark:bg-gray-800">
               <tr>
@@ -332,9 +330,7 @@ export default function AdminDashboard() {
                   </td>
 
                   <td className="px-4 py-3 text-right">
-                    <button className="px-3 py-1 bg-gray-200 dark:bg-gray-700 rounded">
-                      View
-                    </button>
+                    <button className="px-3 py-1 bg-gray-200 dark:bg-gray-700 rounded">View</button>
                   </td>
                 </tr>
               ))}
@@ -351,6 +347,7 @@ export default function AdminDashboard() {
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white dark:bg-gray-900 border rounded-lg w-full max-w-md p-6 relative shadow-xl">
 
+            {/* Close button */}
             <button
               onClick={() => setShowModal(false)}
               className="absolute top-3 right-4 text-gray-500 hover:text-black"
@@ -358,6 +355,7 @@ export default function AdminDashboard() {
               ✕
             </button>
 
+            {/* Image */}
             {selectedItem.image && (
               <img
                 src={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/item-photos/${selectedItem.image}`}
@@ -365,6 +363,7 @@ export default function AdminDashboard() {
               />
             )}
 
+            {/* Title */}
             <h2 className="text-xl font-bold text-ubGold">{selectedItem.name}</h2>
             <p className="text-gray-500 dark:text-gray-400 mb-4">
               {selectedItem.category_name} • {selectedItem.campus_name}
@@ -388,6 +387,7 @@ export default function AdminDashboard() {
                   {selectedItem.status}
                 </span>
               </p>
+
               <p className="text-sm mt-2"><strong>Drop-Off:</strong> {selectedItem.dropoff_location || "N/A"}</p>
               <p className="text-sm"><strong>Storage:</strong> {selectedItem.location || "N/A"}</p>
               <p className="text-sm"><strong>Reported:</strong> {formatDate(selectedItem.reported_at)}</p>
@@ -398,7 +398,7 @@ export default function AdminDashboard() {
               )}
             </div>
 
-            {/* Reporter Info */}
+            {/* Reporter */}
             <div className="bg-gray-100 dark:bg-gray-800 border rounded-lg p-4 mb-4">
               <h3 className="font-semibold mb-2">Reporter Information</h3>
 
@@ -419,6 +419,7 @@ export default function AdminDashboard() {
               {!editingExpiration ? (
                 <p className="text-sm flex items-center gap-2">
                   <strong>Date:</strong>
+
                   <span className={getExpirationColor(selectedItem.report?.expiration_date)}>
                     {selectedItem.report?.expiration_date
                       ? formatDate(selectedItem.report.expiration_date)
@@ -463,7 +464,7 @@ export default function AdminDashboard() {
               )}
             </div>
 
-            {/* BUTTONS */}
+            {/* Footer Buttons */}
             <div className="flex justify-between mt-4">
               <button
                 onClick={() => generateItemPDF(selectedItem)}
@@ -508,7 +509,7 @@ export default function AdminDashboard() {
 ============================================================ */
 function StatCard({ label, value }: { label: string; value: number }) {
   return (
-    <div className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg p-4 text-center shadow-sm">
+    <div className="bg-white dark:bg-gray-800 border rounded-lg p-4 text-center shadow-sm">
       <p className="text-3xl font-bold text-ubGold">{value}</p>
       <p className="text-gray-600 dark:text-gray-400 text-sm mt-1">{label}</p>
     </div>
