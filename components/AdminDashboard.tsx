@@ -4,19 +4,6 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { addLog } from "@/lib/logs";
 
-// ======================
-// TYPES
-// ======================
-type ReportDetails = {
-  report_type: string;
-  description: string;
-  storage_location: string;
-  expiration_date: string | null;
-  created_at: string;
-  handled_by: string | null;
-  handled_by_name?: string | null;
-};
-
 type Item = {
   id: string;
   name: string;
@@ -28,9 +15,19 @@ type Item = {
   reported_at?: string;
   dropoff_location?: string;
   location?: string;
+
   category_name?: string;
   campus_name?: string;
-  report?: ReportDetails | null;
+
+  report?: {
+    report_type: string;
+    description: string;
+    storage_location: string;
+    expiration_date: string | null;
+    created_at: string;
+    handled_by: string | null;
+    handled_by_name?: string | null;
+  } | null;
 };
 
 export default function AdminDashboard() {
@@ -48,9 +45,6 @@ export default function AdminDashboard() {
 
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
 
-  // ======================
-  // LOAD ITEMS + REPORTS
-  // ======================
   useEffect(() => {
     fetchItems();
   }, []);
@@ -76,15 +70,12 @@ export default function AdminDashboard() {
       .order("reported_at", { ascending: false });
 
     if (error) {
-      console.error("Error loading Admin Dashboard:", error);
+      console.error("Error:", error);
       setLoading(false);
       return;
     }
 
-    // ======================
-    // Resolve handled_by full name
-    // ======================
-    const itemsWithHandlers = await Promise.all(
+    const itemsWithHandledBy = await Promise.all(
       (data || []).map(async (item: any) => {
         let handled_by_name = null;
 
@@ -102,7 +93,6 @@ export default function AdminDashboard() {
           ...item,
           category_name: item.categories?.name || "Unknown",
           campus_name: item.campuses?.name || "Unknown",
-
           report: item.report
             ? {
                 ...item.report,
@@ -113,23 +103,20 @@ export default function AdminDashboard() {
       })
     );
 
-    setItems(itemsWithHandlers);
-    setFilteredItems(itemsWithHandlers);
+    setItems(itemsWithHandledBy);
+    setFilteredItems(itemsWithHandledBy);
     setLoading(false);
   }
 
-  // ======================
-  // SEARCH + FILTER
-  // ======================
   useEffect(() => {
-    let list = [...items];
+    let filtered = [...items];
 
-    if (statusFilter !== "All") list = list.filter((i) => i.status === statusFilter);
-    if (campusFilter !== "All") list = list.filter((i) => i.campus_name === campusFilter);
+    if (statusFilter !== "All") filtered = filtered.filter((item) => item.status === statusFilter);
+    if (campusFilter !== "All") filtered = filtered.filter((item) => item.campus_name === campusFilter);
 
     if (searchTerm.trim()) {
       const t = searchTerm.toLowerCase();
-      list = list.filter(
+      filtered = filtered.filter(
         (i) =>
           i.name.toLowerCase().includes(t) ||
           (i.reporter_name || "").toLowerCase().includes(t) ||
@@ -137,23 +124,12 @@ export default function AdminDashboard() {
       );
     }
 
-    setFilteredItems(list);
+    setFilteredItems(filtered);
   }, [items, searchTerm, statusFilter, campusFilter]);
 
-  // ======================
-  // HELPERS
-  // ======================
   const formatDate = (d?: string | null) =>
     d ? new Date(d).toLocaleDateString("en-BZ", { month: "short", day: "numeric", year: "numeric" }) : "—";
 
-  function showToast(msg: string, type: "success" | "error") {
-    setToast({ message: msg, type });
-    setTimeout(() => setToast(null), 3500);
-  }
-
-  // ======================
-  // ACTION: MARK CLAIMED
-  // ======================
   async function markAsClaimed(id: string) {
     if (!confirm("Mark this item as claimed?")) return;
 
@@ -170,9 +146,6 @@ export default function AdminDashboard() {
     } else showToast("Error updating item", "error");
   }
 
-  // ======================
-  // ACTION: DELETE
-  // ======================
   async function deleteItem(id: string) {
     if (!confirm("Delete this item?")) return;
 
@@ -189,9 +162,17 @@ export default function AdminDashboard() {
     } else showToast("Delete failed", "error");
   }
 
-  // ======================
-  // RENDER
-  // ======================
+  function showToast(msg: string, type: "success" | "error") {
+    setToast({ message: msg, type });
+    setTimeout(() => setToast(null), 3500);
+  }
+
+  // Count unique storage rooms
+  const uniqueStorageRooms = Array.from(new Set(items.map((i) => i.location).filter(Boolean))).length;
+
+  // Count campuses
+  const uniqueCampuses = Array.from(new Set(items.map((i) => i.campus_name))).length;
+
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <h1 className="text-3xl font-bold text-ubGold mb-6">Admin Dashboard</h1>
@@ -206,12 +187,22 @@ export default function AdminDashboard() {
         </div>
       )}
 
+      {/* ======= TOP STATS ROW (C1) ======= */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
+        <StatCard label="Total Items" value={items.length} />
+        <StatCard label="Lost" value={items.filter((i) => i.status === "Lost").length} />
+        <StatCard label="Found" value={items.filter((i) => i.status === "Found").length} />
+        <StatCard label="Claimed" value={items.filter((i) => i.status === "Claimed").length} />
+        <StatCard label="Campuses" value={uniqueCampuses} />
+        <StatCard label="Storage Rooms" value={uniqueStorageRooms} />
+      </div>
+
       {/* Filters */}
       <div className="flex flex-wrap gap-3 mb-6">
         <input
           type="text"
           className="px-4 py-2 bg-gray-800 border border-gray-700 rounded text-white flex-1"
-          placeholder="Search by name, reporter, email..."
+          placeholder="Search by name or reporter..."
           onChange={(e) => setSearchTerm(e.target.value)}
         />
 
@@ -230,8 +221,8 @@ export default function AdminDashboard() {
           onChange={(e) => setCampusFilter(e.target.value)}
         >
           <option>All</option>
-          {Array.from(new Set(items.map((i) => i.campus_name))).map((c) => (
-            <option key={c}>{c}</option>
+          {Array.from(new Set(items.map((i) => i.campus_name))).map((campus) => (
+            <option key={campus}>{campus}</option>
           ))}
         </select>
       </div>
@@ -295,10 +286,11 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {/* MODAL */}
+      {/* ================= MODAL ================= */}
       {showModal && selectedItem && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-          <div className="bg-gray-900 border border-gray-700 rounded-lg max-w-lg w-full p-6 relative">
+          <div className="bg-gray-900 border border-gray-700 rounded-xl max-w-2xl w-full p-6 relative shadow-2xl">
+
             <button
               onClick={() => setShowModal(false)}
               className="absolute top-3 right-4 text-gray-400 text-xl hover:text-white"
@@ -309,53 +301,91 @@ export default function AdminDashboard() {
             {selectedItem.image && (
               <img
                 src={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/item-photos/${selectedItem.image}`}
-                className="w-full h-56 object-cover rounded mb-4"
+                className="w-full h-60 object-cover rounded-lg mb-5 border border-gray-700"
               />
             )}
 
-            <h2 className="text-2xl font-bold text-ubGold mb-2">{selectedItem.name}</h2>
+            <h2 className="text-3xl font-bold text-ubGold mb-1">{selectedItem.name}</h2>
+            <p className="text-gray-400 mb-4 text-sm">
+              {selectedItem.category_name} • {selectedItem.campus_name}
+            </p>
 
-            <p className="text-gray-300"><strong>Category:</strong> {selectedItem.category_name}</p>
-            <p className="text-gray-300"><strong>Campus:</strong> {selectedItem.campus_name}</p>
-            <p className="text-gray-300"><strong>Status:</strong> {selectedItem.status}</p>
-            <p className="text-gray-300"><strong>Drop-Off:</strong> {selectedItem.dropoff_location || "N/A"}</p>
-            <p className="text-gray-300"><strong>Storage:</strong> {selectedItem.location || "N/A"}</p>
-            <p className="text-gray-300"><strong>Reporter:</strong> {selectedItem.reporter_name || "Unknown"}</p>
-            <p className="text-gray-300"><strong>Email:</strong> {selectedItem.reporter_email || "N/A"}</p>
-            <p className="text-gray-300"><strong>Reported:</strong> {formatDate(selectedItem.reported_at)}</p>
+            {/* INFO CARDS */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
-            {selectedItem.description && (
-              <p className="text-gray-300 mt-2">
-                <strong>Description:</strong> {selectedItem.description}
-              </p>
-            )}
+              <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
+                <h3 className="text-lg font-semibold text-white mb-3">Item Information</h3>
+                <p className="text-sm text-gray-300">
+                  <strong>Status:</strong>
+                  <span
+                    className={`ml-2 px-2 py-1 rounded text-xs ${
+                      selectedItem.status === "Claimed"
+                        ? "bg-green-600"
+                        : selectedItem.status === "Lost"
+                        ? "bg-yellow-600"
+                        : "bg-blue-600"
+                    }`}
+                  >
+                    {selectedItem.status}
+                  </span>
+                </p>
+
+                <p className="text-sm text-gray-300 mt-2">
+                  <strong>Drop-Off:</strong> {selectedItem.dropoff_location || "N/A"}
+                </p>
+                <p className="text-sm text-gray-300 mt-1">
+                  <strong>Storage:</strong> {selectedItem.location || "N/A"}
+                </p>
+                <p className="text-sm text-gray-300 mt-1">
+                  <strong>Reported:</strong> {formatDate(selectedItem.reported_at)}
+                </p>
+
+                {selectedItem.description && (
+                  <p className="text-sm text-gray-300 mt-2">
+                    <strong>Description:</strong> {selectedItem.description}
+                  </p>
+                )}
+              </div>
+
+              <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
+                <h3 className="text-lg font-semibold text-white mb-3">Reporter Information</h3>
+                <p className="text-sm text-gray-300"><strong>Name:</strong> {selectedItem.reporter_name || "Unknown"}</p>
+                <p className="text-sm text-gray-300 mt-1">
+                  <strong>Email:</strong>{" "}
+                  <a href={`mailto:${selectedItem.reporter_email}`} className="text-blue-400 underline">
+                    {selectedItem.reporter_email || "N/A"}
+                  </a>
+                </p>
+              </div>
+
+            </div>
 
             {/* REPORT DETAILS */}
             {selectedItem.report && (
-              <div className="mt-5">
+              <div className="mt-6">
                 <button
+                  className="w-full flex justify-between items-center bg-gray-800 border border-gray-700 p-3 rounded-lg"
                   onClick={() => setReportOpen(!reportOpen)}
-                  className="w-full px-4 py-2 flex justify-between items-center bg-gray-800 border border-gray-700 rounded"
                 >
-                  <span>📄 Report Details</span>
+                  <span className="text-white font-medium">📄 Report Details</span>
                   <span className={`transition-transform ${reportOpen ? "rotate-90" : ""}`}>▶</span>
                 </button>
 
                 {reportOpen && (
-                  <div className="mt-3 p-3 bg-gray-800 border border-gray-700 rounded text-sm space-y-2">
-                    <p><strong>Report Type:</strong> {selectedItem.report.report_type}</p>
+                  <div className="mt-3 bg-gray-800 border border-gray-700 rounded-lg p-4 text-sm space-y-2">
+                    <p><strong>Type:</strong> {selectedItem.report.report_type}</p>
                     <p><strong>Description:</strong> {selectedItem.report.description || "N/A"}</p>
-                    <p><strong>Storage Location:</strong> {selectedItem.report.storage_location || "N/A"}</p>
+                    <p><strong>Storage Location:</strong> {selectedItem.report.storage_location}</p>
                     <p><strong>Expiration:</strong> {formatDate(selectedItem.report.expiration_date)}</p>
                     <p><strong>Created:</strong> {formatDate(selectedItem.report.created_at)}</p>
-                    <p><strong>Handled By:</strong> {selectedItem.report.handled_by_name || "System"}</p>
+                    <p><strong>Handled By:</strong> {selectedItem.report.handled_by_name}</p>
                   </div>
                 )}
               </div>
             )}
 
-            {/* ACTIONS */}
-            <div className="flex justify-end gap-3 mt-5">
+            {/* ACTION BUTTONS */}
+            <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-700">
               <button
                 onClick={() => markAsClaimed(selectedItem.id)}
                 className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded text-white"
@@ -377,9 +407,20 @@ export default function AdminDashboard() {
                 Close
               </button>
             </div>
+
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ===== STAT CARD COMPONENT ===== */
+function StatCard({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 text-center">
+      <p className="text-3xl font-bold text-ubGold">{value}</p>
+      <p className="text-gray-400 text-sm mt-1">{label}</p>
     </div>
   );
 }
