@@ -16,7 +16,6 @@ export default function LogsPage() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const logsPerPage = 8;
 
@@ -41,11 +40,12 @@ export default function LogsPage() {
             id: log.id,
             action: log.action,
             timestamp: log.timestamp,
-            item: log.item?.[0] || { name: null },
-            performer: log.performer?.[0] || { email: null },
+            item: log.item || { name: null },       // ⭐ FIXED
+            performer: log.performer || { email: null }, // ⭐ FIXED
           }))
         );
       }
+
       setLoading(false);
     }
 
@@ -75,10 +75,7 @@ export default function LogsPage() {
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
-    link.setAttribute(
-      "download",
-      `JaguarTrack_Logs_${new Date().toISOString()}.csv`
-    );
+    link.setAttribute("download", `JaguarTrack_Logs_${new Date().toISOString()}.csv`);
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -94,12 +91,11 @@ export default function LogsPage() {
   };
 
   if (loading)
-    return (
-      <p className="text-center mt-10 text-gray-400">Loading logs…</p>
-    );
+    return <p className="text-center mt-10 text-gray-400">Loading logs…</p>;
 
   return (
     <div className="container mx-auto p-6">
+
       {/* Header */}
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold text-ubGold">📜 System Logs</h1>
@@ -123,7 +119,6 @@ export default function LogsPage() {
                 key={log.id}
                 className="p-4 bg-gray-800 rounded-lg border border-gray-700"
               >
-                {/* Action Badge */}
                 <span
                   className={`px-3 py-1 rounded-full text-xs text-white font-semibold ${badgeColor(
                     log.action
