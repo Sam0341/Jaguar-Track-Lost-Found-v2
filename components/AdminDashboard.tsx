@@ -24,7 +24,6 @@ type Item = {
 
   report?: {
     report_type: string;
-    description: string;
     storage_location: string;
     expiration_date: string | null;
     created_at: string;
@@ -33,10 +32,10 @@ type Item = {
   } | null;
 };
 
+/* ============================================================
+   COMPONENT
+============================================================ */
 export default function AdminDashboard() {
-  /* ============================================================
-     STATE
-  ============================================================ */
   const [items, setItems] = useState<Item[]>([]);
   const [filteredItems, setFilteredItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
@@ -51,7 +50,7 @@ export default function AdminDashboard() {
 
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
 
-  // EDITING EXPIRATION
+  // Expiration Editing
   const [editingExpiration, setEditingExpiration] = useState(false);
   const [newExpiration, setNewExpiration] = useState("");
 
@@ -73,7 +72,6 @@ export default function AdminDashboard() {
         campuses:campus_id ( name ),
         report:reports (
           report_type,
-          description,
           storage_location,
           expiration_date,
           created_at,
@@ -83,23 +81,21 @@ export default function AdminDashboard() {
       .order("reported_at", { ascending: false });
 
     if (error) {
-      console.error("Error:", error);
+      console.error(error);
       setLoading(false);
       return;
     }
 
-    // Load handled_by names
-    const itemsWithHandledBy = await Promise.all(
-      (data || []).map(async (item: any) => {
+    const itemsWithNames = await Promise.all(
+      data.map(async (item: any) => {
         let handled_by_name = null;
-
         if (item.report?.handled_by) {
-          const { data: handler } = await supabase
+          const { data: p } = await supabase
             .from("profiles")
             .select("full_name")
             .eq("id", item.report.handled_by)
             .single();
-          handled_by_name = handler?.full_name || "Unknown Admin";
+          handled_by_name = p?.full_name || "Unknown Admin";
         }
 
         return {
@@ -116,13 +112,13 @@ export default function AdminDashboard() {
       })
     );
 
-    setItems(itemsWithHandledBy);
-    setFilteredItems(itemsWithHandledBy);
+    setItems(itemsWithNames);
+    setFilteredItems(itemsWithNames);
     setLoading(false);
   }
 
   /* ============================================================
-     FILTERING
+     FILTER
   ============================================================ */
   useEffect(() => {
     let filtered = [...items];
@@ -146,72 +142,85 @@ export default function AdminDashboard() {
   /* ============================================================
      HELPERS
   ============================================================ */
-  const formatDate = (d?: string | null) =>
-    d ? new Date(d).toLocaleDateString("en-BZ", { month: "short", day: "numeric", year: "numeric" }) : "—";
 
+  const formatDate = (dateStr: string | null | undefined) => {
+    if (!dateStr) return "—";
+    return new Date(dateStr).toLocaleDateString("en-BZ", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  };
+
+  /** Days left calculation */
+  function getDaysLeft(exp?: string | null) {
+    if (!exp) return null;
+    const today = new Date();
+    const target = new Date(exp);
+    const diff = target.getTime() - today.getTime();
+    return Math.ceil(diff / (1000 * 60 * 60 * 24));
+  }
+
+  /** Toast */
   function showToast(msg: string, type: "success" | "error") {
     setToast({ message: msg, type });
     setTimeout(() => setToast(null), 3500);
   }
 
   /* ============================================================
-     SAVE EXPIRATION DATE
+     SAVE EXPIRATION
   ============================================================ */
   async function saveExpiration() {
     if (!selectedItem?.report) return;
-    if (!newExpiration) return showToast("Please pick a valid date.", "error");
 
     const { error } = await supabase
       .from("reports")
       .update({ expiration_date: newExpiration })
       .eq("item_id", selectedItem.id);
 
-    if (!error) {
-      showToast("Expiration date updated!", "success");
-      setEditingExpiration(false);
-      fetchItems();
-    } else {
-      showToast("Failed to update expiration.", "error");
-    }
+    if (error) return showToast("Failed to update expiration.", "error");
+
+    showToast("Expiration updated!", "success");
+    setEditingExpiration(false);
+    fetchItems();
   }
 
   /* ============================================================
-     MARK AS CLAIMED / DELETE
+     CLAIM & DELETE
   ============================================================ */
   async function markAsClaimed(id: string) {
-    if (!confirm("Mark this item as claimed?")) return;
+    if (!confirm("Mark as claimed?")) return;
 
-    const { data: authData } = await supabase.auth.getUser();
-    const admin = authData?.user;
+    const { data: auth } = await supabase.auth.getUser();
+    const admin = auth?.user;
 
     const { error } = await supabase.from("items").update({ status: "Claimed" }).eq("id", id);
 
-    if (!error) {
-      await addLog("item_claimed", id, admin?.id || "unknown");
-      showToast("Item marked as claimed!", "success");
-      setShowModal(false);
-      fetchItems();
-    } else showToast("Error updating item", "error");
+    if (error) return showToast("Error updating item", "error");
+
+    await addLog("item_claimed", id, admin?.id || "unknown");
+    fetchItems();
+    setShowModal(false);
+    showToast("Item marked as claimed!", "success");
   }
 
   async function deleteItem(id: string) {
-    if (!confirm("Delete this item?")) return;
+    if (!confirm("Delete this?")) return;
 
-    const { data: authData } = await supabase.auth.getUser();
-    const admin = authData?.user;
+    const { data: auth } = await supabase.auth.getUser();
+    const admin = auth?.user;
 
     const { error } = await supabase.from("items").delete().eq("id", id);
+    if (error) return showToast("Delete failed", "error");
 
-    if (!error) {
-      await addLog("item_deleted", id, admin?.id || "unknown");
-      showToast("Item deleted!", "success");
-      setShowModal(false);
-      fetchItems();
-    } else showToast("Delete failed", "error");
+    await addLog("item_deleted", id, admin?.id || "unknown");
+    fetchItems();
+    setShowModal(false);
+    showToast("Item deleted!", "success");
   }
 
   /* ============================================================
-     TOP COUNTS
+     COUNTERS
   ============================================================ */
   const uniqueStorageRooms = Array.from(new Set(items.map((i) => i.location).filter(Boolean))).length;
   const uniqueCampuses = Array.from(new Set(items.map((i) => i.campus_name))).length;
@@ -220,12 +229,12 @@ export default function AdminDashboard() {
      RENDER
   ============================================================ */
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      <h1 className="text-3xl font-bold text-ubGold mb-6">Admin Dashboard</h1>
+    <div className="p-6 max-w-7xl mx-auto bg-gray-100 text-gray-900 dark:bg-gray-900 dark:text-gray-200 min-h-screen">
 
+      {/* Toast */}
       {toast && (
         <div
-          className={`fixed top-5 right-5 px-4 py-2 rounded shadow-lg text-white ${
+          className={`fixed top-5 right-5 px-4 py-2 rounded shadow-lg text-white z-50 ${
             toast.type === "success" ? "bg-green-600" : "bg-red-600"
           }`}
         >
@@ -233,7 +242,9 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {/* ===== STATS ===== */}
+      <h1 className="text-3xl font-bold text-ubGold mb-6">Admin Dashboard</h1>
+
+      {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
         <StatCard label="Total Items" value={items.length} />
         <StatCard label="Lost" value={items.filter((i) => i.status === "Lost").length} />
@@ -243,17 +254,17 @@ export default function AdminDashboard() {
         <StatCard label="Storage Rooms" value={uniqueStorageRooms} />
       </div>
 
-      {/* FILTERS */}
+      {/* Filters */}
       <div className="flex flex-wrap gap-3 mb-6">
         <input
           type="text"
-          className="px-4 py-2 bg-gray-800 border border-gray-700 rounded text-white flex-1"
-          placeholder="Search by name or reporter..."
+          placeholder="Search..."
           onChange={(e) => setSearchTerm(e.target.value)}
+          className="px-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded text-gray-900 dark:text-gray-200 flex-1"
         />
 
         <select
-          className="px-4 py-2 bg-gray-800 border border-gray-700 rounded text-white"
+          className="px-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded text-gray-900 dark:text-gray-200"
           onChange={(e) => setStatusFilter(e.target.value)}
         >
           <option>All</option>
@@ -263,7 +274,7 @@ export default function AdminDashboard() {
         </select>
 
         <select
-          className="px-4 py-2 bg-gray-800 border border-gray-700 rounded text-white"
+          className="px-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded text-gray-900 dark:text-gray-200"
           onChange={(e) => setCampusFilter(e.target.value)}
         >
           <option>All</option>
@@ -273,21 +284,21 @@ export default function AdminDashboard() {
         </select>
       </div>
 
-      {/* TABLE */}
+      {/* Table */}
       {!loading && filteredItems.length === 0 && (
-        <p className="text-center text-gray-400">No items found.</p>
+        <p className="text-center text-gray-500">No items found.</p>
       )}
 
       {!loading && filteredItems.length > 0 && (
-        <div className="overflow-auto rounded border border-gray-700">
-          <table className="w-full text-sm text-gray-300">
-            <thead className="bg-gray-800 text-gray-200">
+        <div className="overflow-auto rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-200 dark:bg-gray-800 text-gray-900 dark:text-gray-100">
               <tr>
-                <th className="px-4 py-3">Name</th>
-                <th className="px-4 py-3">Category</th>
-                <th className="px-4 py-3">Campus</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3 text-right">Actions</th>
+                <th className="px-4 py-3 border-b dark:border-gray-700">Name</th>
+                <th className="px-4 py-3 border-b dark:border-gray-700">Category</th>
+                <th className="px-4 py-3 border-b dark:border-gray-700">Campus</th>
+                <th className="px-4 py-3 border-b dark:border-gray-700">Status</th>
+                <th className="px-4 py-3 border-b dark:border-gray-700 text-right">Actions</th>
               </tr>
             </thead>
 
@@ -295,11 +306,11 @@ export default function AdminDashboard() {
               {filteredItems.map((item) => (
                 <tr
                   key={item.id}
-                  className="border-b border-gray-700 hover:bg-gray-800 cursor-pointer"
+                  className="border-b border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
                   onClick={() => {
                     setSelectedItem(item);
-                    setReportOpen(false);
                     setEditingExpiration(false);
+                    setReportOpen(false);
                     setShowModal(true);
                   }}
                 >
@@ -309,7 +320,7 @@ export default function AdminDashboard() {
 
                   <td className="px-4 py-3">
                     <span
-                      className={`px-3 py-1 rounded-full text-xs ${
+                      className={`px-3 py-1 rounded-full text-xs text-white ${
                         item.status === "Claimed"
                           ? "bg-green-600"
                           : item.status === "Lost"
@@ -322,7 +333,7 @@ export default function AdminDashboard() {
                   </td>
 
                   <td className="px-4 py-3 text-right">
-                    <button className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-white">
+                    <button className="px-3 py-1 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 rounded text-gray-900 dark:text-gray-200">
                       View
                     </button>
                   </td>
@@ -333,44 +344,43 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {/* ===================== MODAL ===================== */}
+      {/* ============================================================
+         MODAL
+      ============================================================ */}
       {showModal && selectedItem && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-          <div className="bg-gray-900 border border-gray-700 rounded-xl max-w-lg w-full p-6 relative shadow-2xl">
+          <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl max-w-lg w-full p-6 relative shadow-2xl text-gray-900 dark:text-gray-100">
 
-            {/* CLOSE BUTTON */}
             <button
               onClick={() => setShowModal(false)}
-              className="absolute top-3 right-4 text-gray-400 text-xl hover:text-white"
+              className="absolute top-3 right-4 text-gray-500 dark:text-gray-300 hover:text-black"
             >
               ✕
             </button>
 
-            {/* IMAGE */}
             {selectedItem.image && (
               <img
                 src={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/item-photos/${selectedItem.image}`}
-                className="w-full h-56 object-cover rounded-lg mb-5 border border-gray-700"
+                className="w-full h-56 object-cover rounded-lg mb-5 border border-gray-300 dark:border-gray-700"
               />
             )}
 
-            {/* TITLE */}
-            <h2 className="text-2xl font-bold text-ubGold mb-1">{selectedItem.name}</h2>
-            <p className="text-gray-400 mb-4 text-sm">
+            <h2 className="text-2xl font-bold text-ubGold">{selectedItem.name}</h2>
+            <p className="text-gray-500 dark:text-gray-400 mb-4">
               {selectedItem.category_name} • {selectedItem.campus_name}
             </p>
 
-            {/* INFO GRID */}
+            {/* Info Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
-              {/* ITEM INFO */}
-              <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
-                <h3 className="text-lg font-semibold text-white mb-3">Item Information</h3>
+              {/* Item Info */}
+              <div className="bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg p-4">
+                <h3 className="text-lg font-semibold mb-3">Item Information</h3>
 
-                <p className="text-sm text-gray-300">
+                <p className="text-sm">
                   <strong>Status:</strong>
                   <span
-                    className={`ml-2 px-2 py-1 rounded text-xs ${
+                    className={`ml-2 px-2 py-1 rounded text-xs text-white ${
                       selectedItem.status === "Claimed"
                         ? "bg-green-600"
                         : selectedItem.status === "Lost"
@@ -382,26 +392,24 @@ export default function AdminDashboard() {
                   </span>
                 </p>
 
-                <p className="text-sm text-gray-300 mt-2"><strong>Drop-Off:</strong> {selectedItem.dropoff_location || "N/A"}</p>
-                <p className="text-sm text-gray-300 mt-1"><strong>Storage:</strong> {selectedItem.location || "N/A"}</p>
-                <p className="text-sm text-gray-300 mt-1"><strong>Reported:</strong> {formatDate(selectedItem.reported_at)}</p>
+                <p className="text-sm mt-2"><strong>Drop-Off:</strong> {selectedItem.dropoff_location || "N/A"}</p>
+                <p className="text-sm mt-1"><strong>Storage:</strong> {selectedItem.location || "N/A"}</p>
+                <p className="text-sm mt-1"><strong>Reported:</strong> {formatDate(selectedItem.reported_at)}</p>
 
                 {selectedItem.description && (
-                  <p className="text-sm text-gray-300 mt-2">
-                    <strong>Description:</strong> {selectedItem.description}
-                  </p>
+                  <p className="text-sm mt-2"><strong>Description:</strong> {selectedItem.description}</p>
                 )}
               </div>
 
-              {/* REPORTER INFO */}
-              <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
-                <h3 className="text-lg font-semibold text-white mb-3">Reporter Information</h3>
+              {/* Reporter Info */}
+              <div className="bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg p-4">
+                <h3 className="text-lg font-semibold mb-3">Reporter Information</h3>
 
-                <p className="text-sm text-gray-300"><strong>Name:</strong> {selectedItem.reporter_name || "Unknown"}</p>
+                <p className="text-sm"><strong>Name:</strong> {selectedItem.reporter_name || "Unknown"}</p>
 
-                <p className="text-sm text-gray-300 mt-1">
+                <p className="text-sm mt-1">
                   <strong>Email:</strong>{" "}
-                  <a href={`mailto:${selectedItem.reporter_email}`} className="text-blue-400 underline">
+                  <a href={`mailto:${selectedItem.reporter_email}`} className="text-blue-600 dark:text-blue-400 underline">
                     {selectedItem.reporter_email || "N/A"}
                   </a>
                 </p>
@@ -412,20 +420,21 @@ export default function AdminDashboard() {
             {/* REPORT DETAILS */}
             {selectedItem.report && (
               <div className="mt-6">
+
                 <button
-                  className="w-full flex justify-between items-center bg-gray-800 border border-gray-700 p-3 rounded-lg"
+                  className="w-full flex justify-between items-center bg-gray-200 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 p-3 rounded-lg"
                   onClick={() => setReportOpen(!reportOpen)}
                 >
-                  <span className="text-white font-medium">📄 Report Details</span>
+                  <span className="font-medium">📄 Report Details</span>
                   <span className={`transition-transform ${reportOpen ? "rotate-90" : ""}`}>▶</span>
                 </button>
 
                 {reportOpen && (
-                  <div className="mt-3 bg-gray-800 border border-gray-700 rounded-lg p-4 text-sm space-y-3">
+                  <div className="mt-3 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg p-4 text-sm space-y-3">
 
                     <p><strong>Type:</strong> {selectedItem.report.report_type}</p>
 
-                    {/* ==================== EXPIRATION EDITABLE ==================== */}
+                    {/* ===== EXPIRATION EDITABLE ===== */}
                     <div className="mt-2">
   <strong>Expiration:</strong>{" "}
 
@@ -480,8 +489,8 @@ export default function AdminDashboard() {
               </div>
             )}
 
-            {/* BUTTONS */}
-            <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-700">
+            {/* ACTION BUTTONS */}
+            <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-300 dark:border-gray-700">
               <button
                 onClick={() => markAsClaimed(selectedItem.id)}
                 className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded text-white"
@@ -498,7 +507,7 @@ export default function AdminDashboard() {
 
               <button
                 onClick={() => setShowModal(false)}
-                className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-white"
+                className="px-4 py-2 bg-gray-400 dark:bg-gray-700 hover:bg-gray-500 rounded text-black dark:text-white"
               >
                 Close
               </button>
@@ -512,13 +521,13 @@ export default function AdminDashboard() {
 }
 
 /* ============================================================
-   STAT CARD COMPONENT
+   STAT CARD
 ============================================================ */
 function StatCard({ label, value }: { label: string; value: number }) {
   return (
-    <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 text-center">
+    <div className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg p-4 text-center shadow-sm">
       <p className="text-3xl font-bold text-ubGold">{value}</p>
-      <p className="text-gray-400 text-sm mt-1">{label}</p>
+      <p className="text-gray-600 dark:text-gray-400 text-sm mt-1">{label}</p>
     </div>
   );
 }
