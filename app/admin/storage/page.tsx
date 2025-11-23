@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
+// ------------------- ITEM TYPE -------------------
 type Item = {
   id: string;
   name: string;
@@ -14,6 +15,7 @@ type Item = {
   image?: string;
   reported_at?: string;
   reporter_name?: string;
+  dropoff_location?: string | null;   // ⭐ ADDED
 };
 
 export default function StoragePage() {
@@ -23,7 +25,6 @@ export default function StoragePage() {
 
   const [searchTerm, setSearchTerm] = useState("");
   const [campusFilter, setCampusFilter] = useState("All");
-  const [statusFilter, setStatusFilter] = useState("All");
   const [storageFilter, setStorageFilter] = useState("All");
 
   const [selectedItem, setSelectedItem] = useState<Item | null>(null);
@@ -32,66 +33,68 @@ export default function StoragePage() {
   const [newStorage, setNewStorage] = useState("");
   const [toast, setToast] = useState<{ msg: string; type: string } | null>(null);
 
-  // PAGINATION
+  // Pagination
   const [page, setPage] = useState(1);
   const PER_PAGE = 8;
 
-  // ⭐ NEW — Stats
+  // Stats
   const [stats, setStats] = useState({
     total: 0,
-    lost: 0,
     found: 0,
-    claimed: 0,
     campuses: 0,
     storages: 0,
   });
+
+  // Preset UB Storage Rooms
+  const UB_STORAGE_ROOMS = [
+    "Security Storage Room",
+    "Campus Storage A",
+    "Campus Storage B",
+    "Administration Office Shelf",
+  ];
 
   useEffect(() => {
     fetchItems();
   }, []);
 
-  // Fetch all items
+  // ------------------- FETCH ITEMS -------------------
   async function fetchItems() {
     setLoading(true);
 
     const { data, error } = await supabase
       .from("items")
       .select("*")
+      .eq("status", "Found") // ⭐ ONLY SHOW FOUND ITEMS
       .order("reported_at", { ascending: false });
 
     if (!error && data) {
       setItems(data);
       setFilteredItems(data);
-      calculateStats(data); // ⭐ NEW
+      calculateStats(data);
     }
 
     setLoading(false);
   }
 
-  // ⭐ NEW — Calculate Stats
+  // ------------------- STATS -------------------
   function calculateStats(data: Item[]) {
     const campuses = new Set(data.map((i) => i.campus));
     const storages = new Set(data.map((i) => i.location || "N/A"));
 
     setStats({
       total: data.length,
-      lost: data.filter((i) => i.status === "Lost").length,
-      found: data.filter((i) => i.status === "Found").length,
-      claimed: data.filter((i) => i.status === "Claimed").length,
+      found: data.length,
       campuses: campuses.size,
       storages: storages.size,
     });
   }
 
-  // Filters
+  // ------------------- FILTERS -------------------
   useEffect(() => {
     let data = [...items];
 
     if (campusFilter !== "All")
       data = data.filter((i) => i.campus === campusFilter);
-
-    if (statusFilter !== "All")
-      data = data.filter((i) => i.status === statusFilter);
 
     if (storageFilter !== "All")
       data = data.filter((i) => (i.location || "N/A") === storageFilter);
@@ -107,15 +110,23 @@ export default function StoragePage() {
     }
 
     setFilteredItems(data);
-  }, [searchTerm, campusFilter, statusFilter, storageFilter, items]);
+  }, [searchTerm, campusFilter, storageFilter, items]);
 
-  // Update storage location
+  // ------------------- STORAGE UPDATE -------------------
   async function updateStorage() {
     if (!selectedItem) return;
 
+    const finalStorage =
+      newStorage === "__custom" ? "" : newStorage; // empty until user types custom
+
+    if (!finalStorage.trim()) {
+      showToast("Please choose or enter a storage room.", "error");
+      return;
+    }
+
     const { error } = await supabase
       .from("items")
-      .update({ location: newStorage })
+      .update({ location: finalStorage })
       .eq("id", selectedItem.id);
 
     if (!error) {
@@ -127,7 +138,7 @@ export default function StoragePage() {
     }
   }
 
-  // Mark as claimed
+  // ------------------- MARK AS CLAIMED -------------------
   async function markAsClaimed(id: string) {
     const { error } = await supabase
       .from("items")
@@ -142,7 +153,7 @@ export default function StoragePage() {
     }
   }
 
-  // Delete item
+  // ------------------- DELETE -------------------
   async function deleteItem(id: string) {
     const yes = confirm("Delete this item?");
     if (!yes) return;
@@ -157,11 +168,11 @@ export default function StoragePage() {
     }
   }
 
+  // ------------------- UTIL -------------------
+  const campuses = Array.from(new Set(items.map((i) => i.campus)));
   const storageLocations = Array.from(
     new Set(items.map((i) => i.location || "N/A"))
   );
-
-  const campuses = Array.from(new Set(items.map((i) => i.campus)));
 
   const showToast = (msg: string, type: string) => {
     setToast({ msg, type });
@@ -170,23 +181,22 @@ export default function StoragePage() {
 
   // Pagination
   const totalPages = Math.ceil(filteredItems.length / PER_PAGE);
-
   const paginatedItems = filteredItems.slice(
     (page - 1) * PER_PAGE,
     page * PER_PAGE
   );
 
-  // ⭐ NEW — CSV DOWNLOAD
+  // ------------------- CSV DOWNLOAD -------------------
   function downloadCSV() {
     const headers = [
-      "ID,Name,Category,Campus,Storage,Status,Reported_At",
+      "ID,Name,Category,Campus,Dropoff,Storage,Status,Reported_At",
     ];
 
     const rows = items.map(
       (item) =>
-        `${item.id},"${item.name}",${item.category || ""},${item.campus || ""},${
-          item.location || "N/A"
-        },${item.status},${item.reported_at || ""}`
+        `${item.id},"${item.name}",${item.category || ""},${item.campus || ""},"${
+          item.dropoff_location || ""
+        }",${item.location || "N/A"},${item.status},${item.reported_at || ""}`
     );
 
     const csvContent = [...headers, ...rows].join("\n");
@@ -200,19 +210,18 @@ export default function StoragePage() {
     URL.revokeObjectURL(url);
   }
 
+  // ------------------- UI -------------------
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <h1 className="text-3xl font-bold text-ubGold mb-6">📦 Storage Inventory</h1>
 
-      {/* ⭐ NEW — Summary Stats */}
-      <div className="grid md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
+      {/* Stats */}
+      <div className="grid md:grid-cols-3 lg:grid-cols-4 gap-4 mb-8">
         {[
-          { label: "Total Items", value: stats.total },
-          { label: "Lost", value: stats.lost },
-          { label: "Found", value: stats.found },
-          { label: "Claimed", value: stats.claimed },
+          { label: "Found Items", value: stats.found },
           { label: "Campuses", value: stats.campuses },
           { label: "Storage Rooms", value: stats.storages },
+          { label: "Total Records", value: stats.total },
         ].map((box, i) => (
           <div
             key={i}
@@ -224,7 +233,6 @@ export default function StoragePage() {
         ))}
       </div>
 
-      {/* ⭐ NEW — Download Button */}
       <button
         onClick={downloadCSV}
         className="mb-6 px-4 py-2 bg-ubGold text-black font-semibold rounded shadow hover:bg-yellow-400"
@@ -243,7 +251,7 @@ export default function StoragePage() {
       )}
 
       {/* Filters */}
-      <div className="grid sm:grid-cols-4 gap-4 mb-6">
+      <div className="grid sm:grid-cols-3 gap-4 mb-6">
         <input
           type="text"
           placeholder="Search items…"
@@ -265,17 +273,6 @@ export default function StoragePage() {
 
         <select
           className="px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white"
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-        >
-          <option>All</option>
-          <option>Lost</option>
-          <option>Found</option>
-          <option>Claimed</option>
-        </select>
-
-        <select
-          className="px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white"
           value={storageFilter}
           onChange={(e) => setStorageFilter(e.target.value)}
         >
@@ -290,7 +287,7 @@ export default function StoragePage() {
       {loading ? (
         <p className="text-gray-500 text-center py-20">Loading storage…</p>
       ) : paginatedItems.length === 0 ? (
-        <p className="text-gray-400 text-center">No items found.</p>
+        <p className="text-gray-400 text-center">No found items yet.</p>
       ) : (
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
           {paginatedItems.map((item) => (
@@ -312,24 +309,22 @@ export default function StoragePage() {
 
               <h2 className="text-lg font-bold text-ubGold">{item.name}</h2>
               <p className="text-gray-400 text-sm">{item.category}</p>
+
               <p className="text-gray-500 text-sm mt-1">
                 Campus: <span className="text-gray-300">{item.campus}</span>
               </p>
+
               <p className="text-gray-500 text-sm">
-                Stored At: <span className="text-gray-300">{item.location || "N/A"}</span>
+                Drop-Off:{" "}
+                <span className="text-gray-300">
+                  {item.dropoff_location || "N/A"}
+                </span>
               </p>
 
-              <span
-                className={`inline-block mt-2 px-2 py-1 rounded text-xs font-semibold ${
-                  item.status === "Claimed"
-                    ? "bg-green-600"
-                    : item.status === "Lost"
-                    ? "bg-yellow-600"
-                    : "bg-blue-600"
-                }`}
-              >
-                {item.status}
-              </span>
+              <p className="text-gray-500 text-sm">
+                Stored At:{" "}
+                <span className="text-gray-300">{item.location || "N/A"}</span>
+              </p>
             </div>
           ))}
         </div>
@@ -354,10 +349,12 @@ export default function StoragePage() {
         </div>
       )}
 
-      {/* Modal */}
+      {/* ------------------- MODAL ------------------- */}
       {showModal && selectedItem && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center px-4 z-50">
           <div className="bg-gray-900 border border-gray-700 rounded-lg p-6 max-w-lg w-full relative">
+            
+            {/* Close */}
             <button
               className="absolute top-3 right-3 text-gray-400 hover:text-white"
               onClick={() => setShowModal(false)}
@@ -365,23 +362,66 @@ export default function StoragePage() {
               ✕
             </button>
 
-            <h2 className="text-2xl font-bold text-ubGold mb-3">
+            {/* Header */}
+            <h2 className="text-2xl font-bold text-ubGold mb-1">
               {selectedItem.name}
             </h2>
 
-            <p className="text-gray-300 mb-2">
-              Current Storage:
-              <span className="text-white"> {selectedItem.location || "N/A"}</span>
+            <p className="text-gray-400 text-sm mb-4">
+              Category: {selectedItem.category || "Unknown"} • Campus:{" "}
+              {selectedItem.campus || "Unknown"}
             </p>
 
-            <input
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded text-white"
-              placeholder="Update storage location…"
+            {/* Drop-Off Location */}
+            <p className="text-gray-300 font-semibold mb-1">
+              Drop-Off Location:
+            </p>
+            <div className="px-3 py-2 bg-gray-800 border border-gray-700 rounded text-gray-200 mb-4">
+              {selectedItem.dropoff_location || "Not provided"}
+            </div>
+
+            {/* Current Storage */}
+            <p className="text-gray-300 font-semibold mb-1">
+              Current Storage:
+            </p>
+            <div className="px-3 py-2 bg-gray-800 border border-gray-700 rounded text-white mb-4">
+              {selectedItem.location || "N/A"}
+            </div>
+
+            {/* New Storage */}
+            <p className="text-gray-300 font-semibold mb-1">
+              New Storage Location:
+            </p>
+
+            <select
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded text-white mb-3"
               value={newStorage}
               onChange={(e) => setNewStorage(e.target.value)}
-            />
+            >
+              <option value="">Select storage room…</option>
 
+              {UB_STORAGE_ROOMS.map((room) => (
+                <option key={room} value={room}>
+                  {room}
+                </option>
+              ))}
+
+              <option value="__custom">➕ Add Custom Storage Room…</option>
+            </select>
+
+            {/* Custom Storage */}
+            {newStorage === "__custom" && (
+              <input
+                type="text"
+                placeholder="Enter custom storage room…"
+                className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded text-white mb-3"
+                onChange={(e) => setNewStorage(e.target.value)}
+              />
+            )}
+
+            {/* Buttons */}
             <div className="flex justify-end gap-3 mt-5">
+
               <button
                 onClick={updateStorage}
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-white"
