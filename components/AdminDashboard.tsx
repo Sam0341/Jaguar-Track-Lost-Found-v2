@@ -19,7 +19,6 @@ type Item = {
   reported_at?: string;
   dropoff_location?: string;
   location?: string;
-
   category_name?: string;
   campus_name?: string;
 
@@ -51,10 +50,7 @@ export default function AdminDashboard() {
   const [editingExpiration, setEditingExpiration] = useState(false);
   const [newExpiration, setNewExpiration] = useState("");
 
-  const [toast, setToast] = useState<{
-    message: string;
-    type: "success" | "error";
-  } | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
 
   /* ============================================================
      FETCH ITEMS
@@ -98,6 +94,7 @@ export default function AdminDashboard() {
             .select("full_name")
             .eq("id", item.report.handled_by)
             .single();
+
           handled_by_name = p?.full_name || "Unknown Admin";
         }
 
@@ -116,7 +113,7 @@ export default function AdminDashboard() {
   }
 
   /* ============================================================
-     FILTERING LOGIC
+     FILTERING
   ============================================================ */
   useEffect(() => {
     let filtered = [...items];
@@ -179,20 +176,36 @@ export default function AdminDashboard() {
   }
 
   /* ============================================================
-     SAVE EXPIRATION
+     SAVE EXPIRATION (INSTANT UPDATE)
   ============================================================ */
   async function saveExpiration() {
     if (!selectedItem?.report) return;
 
+    // Update DB
     const { error } = await supabase
       .from("reports")
       .update({ expiration_date: newExpiration })
       .eq("item_id", selectedItem.id);
 
-    if (error) return showToast("Failed to update expiration.", "error");
+    if (error) {
+      showToast("Failed to update expiration.", "error");
+      return;
+    }
+
+    // Update local modal UI instantly
+    setSelectedItem((prev: any) => ({
+      ...prev,
+      report: {
+        ...prev.report,
+        expiration_date: newExpiration,
+      },
+    }));
 
     showToast("Expiration updated!", "success");
+
     setEditingExpiration(false);
+
+    // Refresh dashboard list
     fetchItems();
   }
 
@@ -262,18 +275,9 @@ export default function AdminDashboard() {
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
         <StatCard label="Total Items" value={items.length} />
-        <StatCard
-          label="Lost"
-          value={items.filter((i) => i.status === "Lost").length}
-        />
-        <StatCard
-          label="Found"
-          value={items.filter((i) => i.status === "Found").length}
-        />
-        <StatCard
-          label="Claimed"
-          value={items.filter((i) => i.status === "Claimed").length}
-        />
+        <StatCard label="Lost" value={items.filter((i) => i.status === "Lost").length} />
+        <StatCard label="Found" value={items.filter((i) => i.status === "Found").length} />
+        <StatCard label="Claimed" value={items.filter((i) => i.status === "Claimed").length} />
         <StatCard label="Campuses" value={uniqueCampuses} />
         <StatCard label="Storage Rooms" value={uniqueStorageRooms} />
       </div>
@@ -359,17 +363,18 @@ export default function AdminDashboard() {
                 </tr>
               ))}
             </tbody>
+
           </table>
         </div>
       )}
 
       {/* ============================================================
-         MODAL (NEW 2-COLUMN MODAL – WIDE & CLEAN)
+         MODAL (WIDE + 2 COLUMN)
       ============================================================ */}
       {showModal && selectedItem && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white dark:bg-gray-900 border rounded-xl w-full max-w-4xl p-6 relative shadow-2xl">
-            
+
             {/* Close Button */}
             <button
               onClick={() => setShowModal(false)}
@@ -380,7 +385,6 @@ export default function AdminDashboard() {
 
             {/* HEADER */}
             <div className="flex gap-6">
-              {/* IMAGE */}
               {selectedItem.image && (
                 <img
                   src={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/item-photos/${selectedItem.image}`}
@@ -388,23 +392,20 @@ export default function AdminDashboard() {
                 />
               )}
 
-              {/* TITLE + META */}
               <div className="w-1/2 flex flex-col justify-center">
-                <h2 className="text-3xl font-bold text-ubGold">
-                  {selectedItem.name}
-                </h2>
+                <h2 className="text-3xl font-bold text-ubGold">{selectedItem.name}</h2>
+
                 <p className="text-gray-500 dark:text-gray-400 mt-2 text-lg">
                   {selectedItem.category_name} • {selectedItem.campus_name}
                 </p>
 
                 <p className="text-md text-gray-400 mt-3">
-                  Reported: {formatDate(selectedItem.reported_at)} —{" "}
-                  {formatTime(selectedItem.reported_at)}
+                  Reported: {formatDate(selectedItem.reported_at)} — {formatTime(selectedItem.reported_at)}
                 </p>
               </div>
             </div>
 
-            {/* 2-COLUMN LAYOUT */}
+            {/* BODY */}
             <div className="grid grid-cols-2 gap-6 mt-8">
 
               {/* ITEM INFO */}
@@ -426,39 +427,23 @@ export default function AdminDashboard() {
                   </span>
                 </p>
 
-                <p className="text-sm mt-2">
-                  <strong>Drop-Off:</strong>{" "}
-                  {selectedItem.dropoff_location || "N/A"}
-                </p>
-
-                <p className="text-sm">
-                  <strong>Storage:</strong> {selectedItem.location || "N/A"}
-                </p>
+                <p className="text-sm mt-2"><strong>Drop-Off:</strong> {selectedItem.dropoff_location || "N/A"}</p>
+                <p className="text-sm"><strong>Storage:</strong> {selectedItem.location || "N/A"}</p>
 
                 {selectedItem.description && (
-                  <p className="text-sm mt-2">
-                    <strong>Description:</strong> {selectedItem.description}
-                  </p>
+                  <p className="text-sm mt-2"><strong>Description:</strong> {selectedItem.description}</p>
                 )}
               </div>
 
               {/* REPORTER INFO */}
               <div className="bg-gray-100 dark:bg-gray-800 border rounded-lg p-4">
-                <h3 className="font-semibold text-lg mb-2">
-                  Reporter Information
-                </h3>
+                <h3 className="font-semibold text-lg mb-2">Reporter Information</h3>
 
-                <p className="text-sm">
-                  <strong>Name:</strong>{" "}
-                  {selectedItem.reporter_name || "Unknown"}
-                </p>
+                <p className="text-sm"><strong>Name:</strong> {selectedItem.reporter_name || "Unknown"}</p>
 
                 <p className="text-sm mt-1">
                   <strong>Email:</strong>{" "}
-                  <a
-                    href={`mailto:${selectedItem.reporter_email}`}
-                    className="text-blue-500 underline"
-                  >
+                  <a href={`mailto:${selectedItem.reporter_email}`} className="text-blue-500 underline">
                     {selectedItem.reporter_email || "N/A"}
                   </a>
                 </p>
@@ -471,11 +456,7 @@ export default function AdminDashboard() {
                 {!editingExpiration ? (
                   <p className="text-sm flex items-center gap-2">
                     <strong>Date:</strong>
-                    <span
-                      className={getExpirationColor(
-                        selectedItem.report?.expiration_date
-                      )}
-                    >
+                    <span className={getExpirationColor(selectedItem.report?.expiration_date)}>
                       {selectedItem.report?.expiration_date
                         ? formatDate(selectedItem.report.expiration_date)
                         : "—"}
@@ -552,6 +533,7 @@ export default function AdminDashboard() {
                 </button>
               </div>
             </div>
+
           </div>
         </div>
       )}
