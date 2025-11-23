@@ -563,39 +563,52 @@ useEffect(() => {
       <div className="bg-gray-900 p-4 rounded-xl border border-gray-700 shadow">
         {/* HEADER */}
         <div className="flex justify-between items-start gap-4 mb-3">
-          <div>
-            <h2 className="text-xl font-bold text-white mb-1">
-              {selectedClaim.item?.name}
-            </h2>
+  {/* LEFT SIDE - ITEM INFO */}
+  <div>
+    <h2 className="text-xl font-bold text-white mb-1">
+      {selectedClaim.item?.name}
+    </h2>
 
-            <p className="text-gray-300 text-sm mb-1">
-              {selectedClaim.item?.description}
-            </p>
+    <p className="text-gray-300 text-sm mb-1">
+      {selectedClaim.item?.description}
+    </p>
 
-            <p className="text-gray-400 text-xs">
-              📍 {selectedClaim.item?.location || "Unknown"} • 🏫{" "}
-              {selectedClaim.campus || "Unknown campus"}
-            </p>
+    <p className="text-gray-400 text-xs">
+      📍 {selectedClaim.item?.location || "Unknown"} • 🏫{" "}
+      {selectedClaim.campus || "Unknown campus"}
+    </p>
 
-            {selectedClaim.message && (
-              <p className="text-sm text-gray-300 mt-2 italic">
-                “{selectedClaim.message}”
-              </p>
-            )}
-          </div>
+    {selectedClaim.message && (
+      <p className="text-sm text-gray-300 mt-2 italic">
+        “{selectedClaim.message}”
+      </p>
+    )}
+  </div>
 
-          <span
-            className={`px-3 py-1 rounded-full text-xs font-semibold ${
-              (selectedClaim.status || "pending") === "approved"
-                ? "bg-green-600 text-white"
-                : (selectedClaim.status || "pending") === "rejected"
-                ? "bg-red-600 text-white"
-                : "bg-yellow-500 text-black"
-            }`}
-          >
-            {selectedClaim.status || "pending"}
-          </span>
-        </div>
+  {/* RIGHT SIDE - STATUS + DOWNLOAD BUTTON */}
+  <div className="flex flex-col items-end gap-2">
+    <span
+      className={`px-3 py-1 rounded-full text-xs font-semibold ${
+        (selectedClaim.status || "pending") === "approved"
+          ? "bg-green-600 text-white"
+          : (selectedClaim.status || "pending") === "rejected"
+          ? "bg-red-600 text-white"
+          : "bg-yellow-500 text-black"
+      }`}
+    >
+      {selectedClaim.status || "pending"}
+    </span>
+
+    {/* 📥 DOWNLOAD CHAT BUTTON */}
+    <button
+      onClick={downloadChatTranscript}
+      className="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs shadow"
+    >
+      Download Chat
+    </button>
+  </div>
+</div>
+
 
         {/* MESSAGES */}
         <div className="h-[55vh] overflow-y-auto space-y-3 mb-4 p-2 border-t border-b border-gray-700">
