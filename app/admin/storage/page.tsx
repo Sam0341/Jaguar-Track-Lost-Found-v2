@@ -31,15 +31,11 @@ export default function StoragePage() {
   const [showModal, setShowModal] = useState(false);
 
   const [newStorage, setNewStorage] = useState("");
-  const [toast, setToast] = useState<{ msg: string; type: string } | null>(
-    null
-  );
+  const [toast, setToast] = useState<{ msg: string; type: string } | null>(null);
 
-  // PAGINATION
   const [page, setPage] = useState(1);
   const PER_PAGE = 8;
 
-  // Stats
   const [stats, setStats] = useState({
     total: 0,
     lost: 0,
@@ -53,7 +49,6 @@ export default function StoragePage() {
     fetchItems();
   }, []);
 
-  // Fetch items
   async function fetchItems() {
     setLoading(true);
 
@@ -71,7 +66,6 @@ export default function StoragePage() {
     setLoading(false);
   }
 
-  // Stats
   function calculateStats(data: Item[]) {
     const campuses = new Set(data.map((i) => i.campus));
     const storages = new Set(data.map((i) => i.location || "N/A"));
@@ -86,7 +80,7 @@ export default function StoragePage() {
     });
   }
 
-  // Filters
+  // Filtering
   useEffect(() => {
     let data = [...items];
 
@@ -112,7 +106,6 @@ export default function StoragePage() {
     setFilteredItems(data);
   }, [searchTerm, campusFilter, statusFilter, storageFilter, items]);
 
-  // ⭐ Update storage + LOG
   async function updateStorage() {
     if (!selectedItem) return;
 
@@ -124,7 +117,6 @@ export default function StoragePage() {
       .eq("id", selectedItem.id);
 
     if (!error) {
-      // Insert log
       await supabase.from("logs").insert({
         action: "storage_updated",
         item_id: selectedItem.id,
@@ -139,7 +131,6 @@ export default function StoragePage() {
     }
   }
 
-  // Mark as claimed
   async function markAsClaimed(id: string) {
     const user = (await supabase.auth.getUser()).data.user;
 
@@ -149,7 +140,6 @@ export default function StoragePage() {
       .eq("id", id);
 
     if (!error) {
-      // Log
       await supabase.from("logs").insert({
         action: "item_claimed",
         item_id: id,
@@ -163,7 +153,6 @@ export default function StoragePage() {
     }
   }
 
-  // Delete item
   async function deleteItem(id: string) {
     const yes = confirm("Delete this item?");
     if (!yes) return;
@@ -173,7 +162,6 @@ export default function StoragePage() {
     const { error } = await supabase.from("items").delete().eq("id", id);
 
     if (!error) {
-      // Log
       await supabase.from("logs").insert({
         action: "item_deleted",
         item_id: id,
@@ -205,7 +193,6 @@ export default function StoragePage() {
     page * PER_PAGE
   );
 
-  // CSV Download
   function downloadCSV() {
     const headers = ["ID,Name,Category,Campus,Storage,Status,Reported_At"];
 
@@ -228,7 +215,7 @@ export default function StoragePage() {
   }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
+    <div className="p-6 max-w-7xl mx-auto bg-white text-black">
       <h1 className="text-3xl font-bold text-ubGold mb-6">
         📦 Storage Inventory
       </h1>
@@ -245,10 +232,10 @@ export default function StoragePage() {
         ].map((box, i) => (
           <div
             key={i}
-            className="bg-gray-900 border border-gray-700 rounded-lg p-4 text-center shadow"
+            className="bg-white border border-gray-300 rounded-lg p-4 text-center shadow-sm"
           >
             <p className="text-2xl font-bold text-ubGold">{box.value}</p>
-            <p className="text-gray-400 text-sm">{box.label}</p>
+            <p className="text-gray-700 text-sm">{box.label}</p>
           </div>
         ))}
       </div>
@@ -277,13 +264,13 @@ export default function StoragePage() {
         <input
           type="text"
           placeholder="Search items…"
-          className="px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white"
+          className="px-3 py-2 bg-white border border-gray-300 rounded-lg text-black"
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
         />
 
         <select
-          className="px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white"
+          className="px-3 py-2 bg-white border border-gray-300 rounded-lg text-black"
           value={campusFilter}
           onChange={(e) => setCampusFilter(e.target.value)}
         >
@@ -294,7 +281,7 @@ export default function StoragePage() {
         </select>
 
         <select
-          className="px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white"
+          className="px-3 py-2 bg-white border border-gray-300 rounded-lg text-black"
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
         >
@@ -305,7 +292,7 @@ export default function StoragePage() {
         </select>
 
         <select
-          className="px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white"
+          className="px-3 py-2 bg-white border border-gray-300 rounded-lg text-black"
           value={storageFilter}
           onChange={(e) => setStorageFilter(e.target.value)}
         >
@@ -320,13 +307,13 @@ export default function StoragePage() {
       {loading ? (
         <p className="text-gray-500 text-center py-20">Loading storage…</p>
       ) : paginatedItems.length === 0 ? (
-        <p className="text-gray-400 text-center">No items found.</p>
+        <p className="text-gray-600 text-center">No items found.</p>
       ) : (
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
           {paginatedItems.map((item) => (
             <div
               key={item.id}
-              className="bg-gray-900 border border-gray-700 rounded-lg p-4 shadow hover:border-ubGold cursor-pointer"
+              className="bg-white border border-gray-300 rounded-lg p-4 shadow-sm hover:border-ubGold cursor-pointer"
               onClick={() => {
                 setSelectedItem(item);
                 setNewStorage(item.location || "");
@@ -341,24 +328,23 @@ export default function StoragePage() {
               )}
 
               <h2 className="text-lg font-bold text-ubGold">{item.name}</h2>
-              <p className="text-gray-400 text-sm">{item.category}</p>
+              <p className="text-gray-600 text-sm">{item.category}</p>
 
-              <p className="text-gray-500 text-sm">
+              <p className="text-gray-700 text-sm">
                 Drop-Off:{" "}
-                <span className="text-gray-300">
+                <span className="text-gray-900">
                   {item.dropoff_location || "N/A"}
                 </span>
               </p>
 
-              <p className="text-gray-500 text-sm mt-1">
+              <p className="text-gray-700 text-sm mt-1">
                 Stored At:{" "}
-                <span className="text-gray-300">
-                  {item.location || "N/A"}
-                </span>
+                <span className="text-gray-900">{item.location || "N/A"}</span>
               </p>
 
               <span
-                className={`inline-block mt-2 px-2 py-1 rounded text-xs font-semibold ${
+                className={`inline-block mt-2 px-2 py-1 rounded text-xs font-semibold text-white
+                ${
                   item.status === "Claimed"
                     ? "bg-green-600"
                     : item.status === "Lost"
@@ -382,7 +368,7 @@ export default function StoragePage() {
               className={`px-3 py-1 rounded ${
                 page === i + 1
                   ? "bg-ubGold text-black"
-                  : "bg-gray-800 text-gray-300"
+                  : "bg-white border border-gray-300 text-gray-700"
               }`}
               onClick={() => setPage(i + 1)}
             >
@@ -394,10 +380,10 @@ export default function StoragePage() {
 
       {/* Modal */}
       {showModal && selectedItem && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center px-4 z-50">
-          <div className="bg-gray-900 border border-gray-700 rounded-lg p-6 max-w-lg w-full relative">
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center px-4 z-50">
+          <div className="bg-white border border-gray-300 rounded-lg p-6 max-w-lg w-full relative shadow-lg">
             <button
-              className="absolute top-3 right-3 text-gray-400 hover:text-white"
+              className="absolute top-3 right-3 text-gray-500 hover:text-black"
               onClick={() => setShowModal(false)}
             >
               ✕
@@ -407,28 +393,28 @@ export default function StoragePage() {
               {selectedItem.name}
             </h2>
 
-            <p className="text-gray-400 mb-4">
+            <p className="text-gray-600 mb-4">
               Category: {selectedItem.category || "Unknown"} • Campus:{" "}
               {selectedItem.campus || "Unknown"}
             </p>
 
-            <p className="text-gray-300 mb-1">Drop-Off Location:</p>
+            <p className="text-gray-700 mb-1">Drop-Off Location:</p>
             <input
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded text-gray-400"
+              className="w-full px-3 py-2 bg-gray-100 border border-gray-300 rounded"
               value={selectedItem.dropoff_location || "N/A"}
               disabled
             />
 
-            <p className="text-gray-300 mt-4 mb-1">Current Storage:</p>
+            <p className="text-gray-700 mt-4 mb-1">Current Storage:</p>
             <input
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded text-gray-300"
+              className="w-full px-3 py-2 bg-gray-100 border border-gray-300 rounded"
               value={selectedItem.location || "N/A"}
               disabled
             />
 
-            <p className="text-gray-300 mt-4 mb-1">New Storage Location:</p>
+            <p className="text-gray-700 mt-4 mb-1">New Storage Location:</p>
             <select
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded text-white"
+              className="w-full px-3 py-2 bg-white border border-gray-400 rounded"
               value={newStorage}
               onChange={(e) => setNewStorage(e.target.value)}
             >
