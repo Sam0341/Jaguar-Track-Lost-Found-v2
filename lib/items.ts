@@ -90,19 +90,17 @@ export async function getItemById(id: string) {
     `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/item-photos`;
 
   return {
-  ...data,
-
-  campus: data.campus?.[0]?.name || "Unknown Campus",
-  category: data.category?.[0]?.name || "Other",
-
-  image_url: data.image
-    ? `${PUBLIC_BUCKET}/${data.image}`
-    : "https://placehold.co/600x400?text=No+Image",
-};
+    ...data,
+    campus: data.campus?.[0]?.name || "Unknown Campus",
+    category: data.category?.[0]?.name || "Other",
+    image_url: data.image
+      ? `${PUBLIC_BUCKET}/${data.image}`
+      : "https://placehold.co/600x400?text=No+Image",
+  };
 }
 
 // -------------------------------------------------------
-// ADD A NEW ITEM (with dropoff location)
+// ADD A NEW ITEM + AUTO REPORT + AUTO EXPIRATION
 // -------------------------------------------------------
 export async function addItem({
   name,
@@ -145,29 +143,52 @@ export async function addItem({
     }
 
     // Insert item
-    const { error } = await supabase.from("items").insert([
-      {
-        name,
-        description,
-        location,
-        dropoff_location: dropoffLocation || null,
-        status,
-        image: imagePath,
+    const { data: inserted, error } = await supabase
+      .from("items")
+      .insert([
+        {
+          name,
+          description,
+          location,
+          dropoff_location: dropoffLocation || null,
+          status,
+          image: imagePath,
 
-        reported_by: userId,
-        reporter_name: reporterName,
-        reporter_email: reporterEmail,
+          reported_by: userId,
+          reporter_name: reporterName,
+          reporter_email: reporterEmail,
 
-        category_id: category,
-        campus_id: campus,
+          category_id: category,
+          campus_id: campus,
 
-        reported_at: new Date().toISOString(),
-      },
-    ]);
+          reported_at: new Date().toISOString(),
+        },
+      ])
+      .select()
+      .single();
 
     if (error) throw error;
 
-    console.log("✅ Item added successfully");
+    // -------------------------------------------------------
+    // AUTO CREATE REPORT WITH EXPIRATION
+    // -------------------------------------------------------
+
+    // Lost = 30 days, Found = 14 days
+    const expirationDate =
+      status === "Lost"
+        ? new Date(Date.now() + 30 * 86400000)
+        : new Date(Date.now() + 14 * 86400000);
+
+    await supabase.from("reports").insert({
+      item_id: inserted.id,
+      report_type: status,
+      storage_location: dropoffLocation || null,
+      expiration_date: expirationDate.toISOString(),
+      created_at: new Date().toISOString(),
+      handled_by: null,
+    });
+
+    console.log("✅ Item + Auto Report + Auto Expiration created");
     return true;
   } catch (err: any) {
     console.error("❌ Error adding item:", err.message || err);
