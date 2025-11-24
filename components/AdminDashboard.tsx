@@ -23,6 +23,8 @@ type Item = {
   campus_name?: string;
 
   report?: {
+    id: string;
+    item_id: string;
     report_type: string;
     storage_location: string;
     expiration_date: string | null;
@@ -69,6 +71,8 @@ export default function AdminDashboard() {
         categories:category_id ( name ),
         campuses:campus_id ( name ),
         report:reports (
+          id,
+          item_id,
           report_type,
           storage_location,
           expiration_date,
@@ -85,16 +89,15 @@ export default function AdminDashboard() {
     }
 
     const itemsWithNames = await Promise.all(
-      data.map(async (item: any) => {
+      (data || []).map(async (item: any) => {
         let handled_by_name = null;
 
-        if (item.report?.handled_by) {
+        if (item?.report?.handled_by) {
           const { data: p } = await supabase
             .from("profiles")
             .select("full_name")
             .eq("id", item.report.handled_by)
-            .single();
-
+            .maybeSingle();
           handled_by_name = p?.full_name || "Unknown Admin";
         }
 
@@ -160,9 +163,10 @@ export default function AdminDashboard() {
   function getExpirationColor(exp?: string | null) {
     if (!exp) return "text-gray-400";
 
-    const today = new Date();
-    const date = new Date(exp);
-    const diff = date.getTime() - today.getTime();
+    const today = new Date().setHours(0, 0, 0, 0);
+    const date = new Date(exp).setHours(0, 0, 0, 0);
+    const diff = date - today;
+
     const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
 
     if (days <= 0) return "text-red-600 font-semibold";
@@ -181,7 +185,6 @@ export default function AdminDashboard() {
   async function saveExpiration() {
     if (!selectedItem?.report) return;
 
-    // Update DB
     const { error } = await supabase
       .from("reports")
       .update({ expiration_date: newExpiration })
@@ -192,7 +195,7 @@ export default function AdminDashboard() {
       return;
     }
 
-    // Update local modal UI instantly
+    // Update modal instantly
     setSelectedItem((prev: any) => ({
       ...prev,
       report: {
@@ -205,7 +208,7 @@ export default function AdminDashboard() {
 
     setEditingExpiration(false);
 
-    // Refresh dashboard list
+    // Refresh list
     fetchItems();
   }
 
@@ -369,13 +372,13 @@ export default function AdminDashboard() {
       )}
 
       {/* ============================================================
-         MODAL (WIDE + 2 COLUMN)
+         MODAL
       ============================================================ */}
       {showModal && selectedItem && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white dark:bg-gray-900 border rounded-xl w-full max-w-4xl p-6 relative shadow-2xl">
 
-            {/* Close Button */}
+            {/* Close button */}
             <button
               onClick={() => setShowModal(false)}
               className="absolute top-4 right-4 text-gray-400 hover:text-white text-xl"
@@ -501,7 +504,7 @@ export default function AdminDashboard() {
               </div>
             </div>
 
-            {/* FOOTER BUTTONS */}
+            {/* FOOTER */}
             <div className="flex justify-between mt-6">
               <button
                 onClick={() => generateItemPDF(selectedItem)}
