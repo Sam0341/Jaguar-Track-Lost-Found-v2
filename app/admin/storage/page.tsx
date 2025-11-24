@@ -31,18 +31,16 @@ export default function StoragePage() {
   const [showModal, setShowModal] = useState(false);
 
   const [newStorage, setNewStorage] = useState("");
-  const [toast, setToast] = useState<{ msg: string; type: string } | null>(null);
+  const [toast, setToast] = useState<{ msg: string; type: string } | null>(
+    null
+  );
 
   const [page, setPage] = useState(1);
   const PER_PAGE = 8;
 
   const [stats, setStats] = useState({
-    total: 0,
-    lost: 0,
-    found: 0,
-    claimed: 0,
-    campuses: 0,
     storages: 0,
+    totalStorageItems: 0,
   });
 
   useEffect(() => {
@@ -67,20 +65,16 @@ export default function StoragePage() {
   }
 
   function calculateStats(data: Item[]) {
-    const campuses = new Set(data.map((i) => i.campus));
     const storages = new Set(data.map((i) => i.location || "N/A"));
+    const total = data.length;
 
     setStats({
-      total: data.length,
-      lost: data.filter((i) => i.status === "Lost").length,
-      found: data.filter((i) => i.status === "Found").length,
-      claimed: data.filter((i) => i.status === "Claimed").length,
-      campuses: campuses.size,
       storages: storages.size,
+      totalStorageItems: total,
     });
   }
 
-  // Filtering
+  // Filters
   useEffect(() => {
     let data = [...items];
 
@@ -154,8 +148,7 @@ export default function StoragePage() {
   }
 
   async function deleteItem(id: string) {
-    const yes = confirm("Delete this item?");
-    if (!yes) return;
+    if (!confirm("Delete this item?")) return;
 
     const user = (await supabase.auth.getUser()).data.user;
 
@@ -195,16 +188,17 @@ export default function StoragePage() {
 
   function downloadCSV() {
     const headers = ["ID,Name,Category,Campus,Storage,Status,Reported_At"];
-
     const rows = items.map(
       (item) =>
         `${item.id},"${item.name}",${item.category || ""},${
           item.campus || ""
         },${item.location || "N/A"},${item.status},${item.reported_at || ""}`
     );
-
     const csvContent = [...headers, ...rows].join("\n");
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+
+    const blob = new Blob([csvContent], {
+      type: "text/csv;charset=utf-8;",
+    });
 
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -215,32 +209,33 @@ export default function StoragePage() {
   }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto bg-white text-black">
+    <div className="p-6 max-w-7xl mx-auto">
       <h1 className="text-3xl font-bold text-ubGold mb-6">
         📦 Storage Inventory
       </h1>
 
-      {/* Stats */}
-      <div className="grid md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
-        {[
-          { label: "Total Items", value: stats.total },
-          { label: "Lost", value: stats.lost },
-          { label: "Found", value: stats.found },
-          { label: "Claimed", value: stats.claimed },
-          { label: "Campuses", value: stats.campuses },
-          { label: "Storage Rooms", value: stats.storages },
-        ].map((box, i) => (
-          <div
-            key={i}
-            className="bg-white border border-gray-300 rounded-lg p-4 text-center shadow-sm"
-          >
-            <p className="text-2xl font-bold text-ubGold">{box.value}</p>
-            <p className="text-gray-700 text-sm">{box.label}</p>
-          </div>
-        ))}
+      {/* NEW STATS CARDS */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+        <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-lg p-4 text-center shadow">
+          <p className="text-2xl font-bold text-ubBlue dark:text-ubGold">
+            {stats.totalStorageItems}
+          </p>
+          <p className="text-gray-600 dark:text-gray-400 text-sm">
+            Total Items in Storage
+          </p>
+        </div>
+
+        <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-lg p-4 text-center shadow">
+          <p className="text-2xl font-bold text-ubBlue dark:text-ubGold">
+            {stats.storages}
+          </p>
+          <p className="text-gray-600 dark:text-gray-400 text-sm">
+            Storage Rooms
+          </p>
+        </div>
       </div>
 
-      {/* CSV Download */}
+      {/* CSV BUTTON */}
       <button
         onClick={downloadCSV}
         className="mb-6 px-4 py-2 bg-ubGold text-black font-semibold rounded shadow hover:bg-yellow-400"
@@ -252,7 +247,9 @@ export default function StoragePage() {
       {toast && (
         <div
           className={`fixed top-5 right-5 px-4 py-2 rounded shadow-lg text-white ${
-            toast.type === "success" ? "bg-green-600" : "bg-red-600"
+            toast.type === "success"
+              ? "bg-green-600"
+              : "bg-red-600"
           }`}
         >
           {toast.msg}
@@ -264,13 +261,13 @@ export default function StoragePage() {
         <input
           type="text"
           placeholder="Search items…"
-          className="px-3 py-2 bg-white border border-gray-300 rounded-lg text-black"
+          className="px-3 py-2 bg-white dark:bg-gray-800 border border-gray-400 dark:border-gray-700 rounded-lg text-black dark:text-white"
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
         />
 
         <select
-          className="px-3 py-2 bg-white border border-gray-300 rounded-lg text-black"
+          className="px-3 py-2 bg-white dark:bg-gray-800 border border-gray-400 dark:border-gray-700 rounded-lg text-black dark:text-white"
           value={campusFilter}
           onChange={(e) => setCampusFilter(e.target.value)}
         >
@@ -281,7 +278,7 @@ export default function StoragePage() {
         </select>
 
         <select
-          className="px-3 py-2 bg-white border border-gray-300 rounded-lg text-black"
+          className="px-3 py-2 bg-white dark:bg-gray-800 border border-gray-400 dark:border-gray-700 rounded-lg text-black dark:text-white"
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
         >
@@ -292,7 +289,7 @@ export default function StoragePage() {
         </select>
 
         <select
-          className="px-3 py-2 bg-white border border-gray-300 rounded-lg text-black"
+          className="px-3 py-2 bg-white dark:bg-gray-800 border border-gray-400 dark:border-gray-700 rounded-lg text-black dark:text-white"
           value={storageFilter}
           onChange={(e) => setStorageFilter(e.target.value)}
         >
@@ -303,17 +300,21 @@ export default function StoragePage() {
         </select>
       </div>
 
-      {/* Item Grid */}
+      {/* Items grid */}
       {loading ? (
-        <p className="text-gray-500 text-center py-20">Loading storage…</p>
+        <p className="text-gray-500 dark:text-gray-300 text-center py-20">
+          Loading storage…
+        </p>
       ) : paginatedItems.length === 0 ? (
-        <p className="text-gray-600 text-center">No items found.</p>
+        <p className="text-gray-600 dark:text-gray-400 text-center">
+          No items found.
+        </p>
       ) : (
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
           {paginatedItems.map((item) => (
             <div
               key={item.id}
-              className="bg-white border border-gray-300 rounded-lg p-4 shadow-sm hover:border-ubGold cursor-pointer"
+              className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-lg p-4 shadow hover:border-ubGold cursor-pointer"
               onClick={() => {
                 setSelectedItem(item);
                 setNewStorage(item.location || "");
@@ -327,29 +328,34 @@ export default function StoragePage() {
                 />
               )}
 
-              <h2 className="text-lg font-bold text-ubGold">{item.name}</h2>
-              <p className="text-gray-600 text-sm">{item.category}</p>
+              <h2 className="text-lg font-bold text-ubBlue dark:text-ubGold">
+                {item.name}
+              </h2>
+              <p className="text-gray-600 dark:text-gray-400 text-sm">
+                {item.category}
+              </p>
 
-              <p className="text-gray-700 text-sm">
+              <p className="text-gray-500 dark:text-gray-400 text-sm">
                 Drop-Off:{" "}
-                <span className="text-gray-900">
+                <span className="text-gray-700 dark:text-gray-300">
                   {item.dropoff_location || "N/A"}
                 </span>
               </p>
 
-              <p className="text-gray-700 text-sm mt-1">
+              <p className="text-gray-500 dark:text-gray-400 text-sm mt-1">
                 Stored At:{" "}
-                <span className="text-gray-900">{item.location || "N/A"}</span>
+                <span className="text-gray-700 dark:text-gray-300">
+                  {item.location || "N/A"}
+                </span>
               </p>
 
               <span
-                className={`inline-block mt-2 px-2 py-1 rounded text-xs font-semibold text-white
-                ${
+                className={`inline-block mt-2 px-2 py-1 rounded text-xs font-semibold ${
                   item.status === "Claimed"
-                    ? "bg-green-600"
+                    ? "bg-green-600 text-white"
                     : item.status === "Lost"
-                    ? "bg-yellow-600"
-                    : "bg-blue-600"
+                    ? "bg-yellow-600 text-white"
+                    : "bg-blue-600 text-white"
                 }`}
               >
                 {item.status}
@@ -368,7 +374,7 @@ export default function StoragePage() {
               className={`px-3 py-1 rounded ${
                 page === i + 1
                   ? "bg-ubGold text-black"
-                  : "bg-white border border-gray-300 text-gray-700"
+                  : "bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-700"
               }`}
               onClick={() => setPage(i + 1)}
             >
@@ -380,41 +386,48 @@ export default function StoragePage() {
 
       {/* Modal */}
       {showModal && selectedItem && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center px-4 z-50">
-          <div className="bg-white border border-gray-300 rounded-lg p-6 max-w-lg w-full relative shadow-lg">
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center px-4 z-50">
+          <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-lg p-6 max-w-lg w-full relative">
             <button
-              className="absolute top-3 right-3 text-gray-500 hover:text-black"
+              className="absolute top-3 right-3 text-gray-600 dark:text-gray-300 hover:text-black dark:hover:text-white"
               onClick={() => setShowModal(false)}
             >
               ✕
             </button>
 
-            <h2 className="text-2xl font-bold text-ubGold mb-1">
+            <h2 className="text-2xl font-bold text-ubBlue dark:text-ubGold mb-1">
               {selectedItem.name}
             </h2>
 
-            <p className="text-gray-600 mb-4">
+            <p className="text-gray-700 dark:text-gray-400 mb-4">
               Category: {selectedItem.category || "Unknown"} • Campus:{" "}
               {selectedItem.campus || "Unknown"}
             </p>
 
-            <p className="text-gray-700 mb-1">Drop-Off Location:</p>
+            <p className="text-gray-800 dark:text-gray-300 mb-1">
+              Drop-Off Location:
+            </p>
             <input
-              className="w-full px-3 py-2 bg-gray-100 border border-gray-300 rounded"
+              className="w-full px-3 py-2 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded text-gray-900 dark:text-gray-300"
               value={selectedItem.dropoff_location || "N/A"}
               disabled
             />
 
-            <p className="text-gray-700 mt-4 mb-1">Current Storage:</p>
+            <p className="mt-4 mb-1 text-gray-800 dark:text-gray-300">
+              Current Storage:
+            </p>
             <input
-              className="w-full px-3 py-2 bg-gray-100 border border-gray-300 rounded"
+              className="w-full px-3 py-2 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded text-gray-900 dark:text-gray-300"
               value={selectedItem.location || "N/A"}
               disabled
             />
 
-            <p className="text-gray-700 mt-4 mb-1">New Storage Location:</p>
+            <p className="mt-4 mb-1 text-gray-800 dark:text-gray-300">
+              New Storage Location:
+            </p>
+
             <select
-              className="w-full px-3 py-2 bg-white border border-gray-400 rounded"
+              className="w-full px-3 py-2 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded text-gray-900 dark:text-gray-300"
               value={newStorage}
               onChange={(e) => setNewStorage(e.target.value)}
             >
@@ -428,21 +441,21 @@ export default function StoragePage() {
             <div className="flex justify-end gap-3 mt-5">
               <button
                 onClick={updateStorage}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-white"
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded"
               >
                 Update Storage
               </button>
 
               <button
                 onClick={() => markAsClaimed(selectedItem.id)}
-                className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded text-white"
+                className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded"
               >
                 Mark as Claimed
               </button>
 
               <button
                 onClick={() => deleteItem(selectedItem.id)}
-                className="px-4 py-2 bg-red-600 hover:bg-red-700 rounded text-white"
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded"
               >
                 Delete
               </button>
