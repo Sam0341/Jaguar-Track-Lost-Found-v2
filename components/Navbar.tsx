@@ -124,7 +124,6 @@ export default function Navbar() {
 
     void fetchUnread();
 
-    // create the channel object first so we don't end up returning a Promise from the cleanup
     const channel = supabase.channel("messages_changes");
     channel.on(
       "postgres_changes",
@@ -136,13 +135,8 @@ export default function Navbar() {
       }
     );
 
-    // subscribe but don't return the resulting Promise from the effect
     void channel.subscribe();
-
-    return () => {
-      // call removeChannel but don't return its Promise
-      void supabase.removeChannel(channel);
-    };
+    return () => void supabase.removeChannel(channel);
   }, [user]);
 
   /* ============================
@@ -215,7 +209,6 @@ export default function Navbar() {
             <>
               <NavLink href="/items">Items</NavLink>
               <NavLink href="/report">Report</NavLink>
-
               <NavLink href="/user/claims" badgeCount={unreadCount}>
                 My Claims
               </NavLink>
@@ -228,12 +221,11 @@ export default function Navbar() {
               <NavLink href="/reports">Reports</NavLink>
               <NavLink href="/admin">Admin</NavLink>
               <NavLink href="/admin/claims">Claims</NavLink>
-
-              {/* ⭐ NEW: STORAGE PAGE */}
               <NavLink href="/admin/storage">Storage</NavLink>
-
-              {/* ⭐ NEW: Logs */}
               <NavLink href="/admin/logs">Logs</NavLink>
+
+              {/* ⭐ NEW BUTTON: CREATE USER */}
+              <NavLink href="/admin/create-user">Create User</NavLink>
             </>
           )}
 
@@ -338,21 +330,25 @@ export default function Navbar() {
                     >
                       Claims
                     </NavLink>
-
-                    {/* ⭐ NEW: STORAGE */}
                     <NavLink
                       href="/admin/storage"
                       onClick={() => setMenuOpen(false)}
                     >
                       Storage
                     </NavLink>
-
-                    {/* ⭐ NEW: LOGS */}
                     <NavLink
                       href="/admin/logs"
                       onClick={() => setMenuOpen(false)}
                     >
                       Logs
+                    </NavLink>
+
+                    {/* ⭐ NEW: CREATE USER */}
+                    <NavLink
+                      href="/admin/create-user"
+                      onClick={() => setMenuOpen(false)}
+                    >
+                      Create User
                     </NavLink>
                   </>
                 )}
