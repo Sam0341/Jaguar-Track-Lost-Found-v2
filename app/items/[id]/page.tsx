@@ -18,8 +18,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
   const [feedback, setFeedback] = useState("");
 
   const [someoneElsePending, setSomeoneElsePending] = useState(false);
-
-  const [previewOpen, setPreviewOpen] = useState(false); // ⭐ NEW
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   const router = useRouter();
   const BUCKET = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/item-photos`;
@@ -29,14 +28,13 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
    * ----------------------------------------------------------- */
   useEffect(() => {
     async function load() {
-      /* USER SESSION */
       const { data: sessionData } = await supabase.auth.getSession();
       const session = sessionData?.session;
 
       setUser(session?.user || null);
       if (session?.user?.user_metadata?.role === "admin") setIsAdmin(true);
 
-      /* ITEM DATA */
+      /* ITEM BASE DATA */
       const { data, error } = await supabase
         .from("items")
         .select(
@@ -91,11 +89,19 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
           .select("full_name, email")
           .eq("id", data.reported_by)
           .maybeSingle();
+
         if (profile) {
           reporterName = profile.full_name || "Unknown";
           reporterEmail = profile.email || "";
         }
       }
+
+      /* LOAD REPORT (expiration, storage, etc.) */
+      const { data: reportData } = await supabase
+        .from("reports")
+        .select("expiration_date, created_at, storage_location")
+        .eq("item_id", params.id)
+        .maybeSingle();
 
       setItem({
         ...data,
@@ -106,9 +112,10 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
         image_url: data.image
           ? `${BUCKET}/${data.image}`
           : "https://placehold.co/600x400?text=No+Image",
+        expiration_date: reportData?.expiration_date || null,
       });
 
-      /* CLAIM STATUS */
+      /* CLAIM STATUS (user’s own claim) */
       if (session?.user) {
         const { data: myClaim } = await supabase
           .from("claims")
@@ -138,27 +145,38 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
     }
 
     load();
-
-    // Close preview with ESC
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setPreviewOpen(false);
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
   }, [params.id]);
 
   /* ------------------------------------------
-   * DATE FORMAT
+   * DATE HELPERS
    * ------------------------------------------ */
   const formatDate = (ts: string) =>
-    new Date(ts).toLocaleString("en-US", {
-      weekday: "short",
-      month: "long",
+    new Date(ts).toLocaleDateString("en-BZ", {
+      month: "short",
       day: "numeric",
       year: "numeric",
-      hour: "numeric",
+    });
+
+  const formatTime = (ts: string) =>
+    new Date(ts).toLocaleTimeString("en-BZ", {
+      hour: "2-digit",
       minute: "2-digit",
     });
+
+  /* Expiration color */
+  function expirationColor(exp?: string | null) {
+    if (!exp) return "text-gray-400";
+
+    const today = new Date().setHours(0, 0, 0, 0);
+    const date = new Date(exp).setHours(0, 0, 0, 0);
+    const diff = date - today;
+
+    const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
+
+    if (days <= 0) return "text-red-600 font-semibold";
+    if (days <= 3) return "text-yellow-600 font-semibold";
+    return "text-green-600 font-semibold";
+  }
 
   /* ------------------------------------------
    * SUBMIT CLAIM
@@ -206,8 +224,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
 
   return (
     <div className="container mx-auto p-6 pb-20 relative">
-
-      {/* FULLSCREEN IMAGE PREVIEW ⭐ */}
+      {/* FULLSCREEN IMAGE PREVIEW */}
       {previewOpen && (
         <div
           className="fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center z-50 animate-fadeIn"
@@ -221,20 +238,16 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
       )}
 
       <div className="grid md:grid-cols-2 gap-8">
-
         {/* IMAGE */}
-        <div className="bg-gray-200 dark:bg-gray-800 rounded-xl overflow-hidden shadow h-[360px] flex items-center justify-center cursor-pointer"
-             onClick={() => setPreviewOpen(true)}>
-
-          <img
-            src={item.image_url}
-            className="w-full h-full object-cover"
-          />
+        <div
+          className="bg-gray-200 dark:bg-gray-800 rounded-xl overflow-hidden shadow h-[360px] flex items-center justify-center cursor-pointer"
+          onClick={() => setPreviewOpen(true)}
+        >
+          <img src={item.image_url} className="w-full h-full object-cover" />
         </div>
 
         {/* DETAILS */}
         <div className="bg-white dark:bg-gray-900 p-6 rounded-xl shadow border dark:border-gray-700">
-
           <h1 className="text-3xl font-bold dark:text-white mb-2">{item.name}</h1>
           <p className="text-gray-600 dark:text-gray-300 mb-3">{item.description}</p>
 
@@ -242,19 +255,47 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
           <div className="flex flex-wrap gap-2 mb-5">
             <span className="badge bg-gray-700 text-white">{item.category}</span>
             <span className="badge bg-blue-700 text-white">{item.campus}</span>
-            <span className="badge bg-yellow-500 text-black">{item.status.toUpperCase()}</span>
+            <span className="badge bg-yellow-500 text-black">
+              {item.status.toUpperCase()}
+            </span>
           </div>
 
           {/* REPORT INFO */}
           <div className="text-sm dark:text-gray-300 space-y-1 mb-6">
-            <p><strong>Reported by:</strong> {item.reporter_name}</p>
-            {isAdmin && <p><strong>Email:</strong> {item.reporter_email}</p>}
-            <p><strong>Reported at:</strong> {formatDate(item.reported_at)}</p>
-            <p><strong>Location:</strong> {item.location}</p>
+            <p>
+              <strong>Reported by:</strong> {item.reporter_name}
+            </p>
 
-            {isAdmin && item.dropoff_location && (
-              <p><strong>Drop-off Location:</strong> {item.dropoff_location}</p>
+            {isAdmin && (
+              <p>
+                <strong>Email:</strong> {item.reporter_email}
+              </p>
             )}
+
+            <p>
+              <strong>Reported at:</strong>{" "}
+              {formatDate(item.reported_at)} — {formatTime(item.reported_at)}
+            </p>
+
+            <p>
+              <strong>Location:</strong> {item.location}
+            </p>
+
+            {item.dropoff_location && (
+              <p>
+                <strong>Drop-off:</strong> {item.dropoff_location}
+              </p>
+            )}
+
+            {/* ⭐ EXPIRATION DATE */}
+            <p>
+              <strong>Expiration:</strong>{" "}
+              <span className={expirationColor(item.expiration_date)}>
+                {item.expiration_date
+                  ? formatDate(item.expiration_date)
+                  : "—"}
+              </span>
+            </p>
           </div>
 
           {/* CLAIM STATUSES */}
