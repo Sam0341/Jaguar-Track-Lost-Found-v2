@@ -96,7 +96,7 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
         }
       }
 
-      /* LOAD REPORT (expiration, storage, etc.) */
+      /* REPORT (expiration) */
       const { data: reportData } = await supabase
         .from("reports")
         .select("expiration_date, created_at, storage_location")
@@ -281,13 +281,14 @@ export default function ItemDetails({ params }: { params: { id: string } }) {
               <strong>Location:</strong> {item.location}
             </p>
 
-            {item.dropoff_location && (
+            {/* ONLY SHOW DROP-OFF FOR FOUND ITEMS */}
+            {item.status === "Found" && item.dropoff_location && (
               <p>
                 <strong>Drop-off:</strong> {item.dropoff_location}
               </p>
             )}
 
-            {/* ⭐ EXPIRATION DATE */}
+            {/* ⭐ EXPIRATION DATE (VISIBLE TO USERS) */}
             <p>
               <strong>Expiration:</strong>{" "}
               <span className={expirationColor(item.expiration_date)}>
