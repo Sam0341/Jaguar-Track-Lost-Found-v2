@@ -2,12 +2,10 @@
 
 import { useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
-// import { addLog } from "@/lib/logs";  // optional, uncomment if you want logs
 
 export default function CreateAdminUserPage() {
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [role, setRole] = useState("admin"); // default: admin
+  const [role, setRole] = useState("admin");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -17,49 +15,35 @@ export default function CreateAdminUserPage() {
     setLoading(true);
 
     try {
-      // 🔍 1 — Validate UB email
-      if (!email.endsWith("@ub.edu.bz")) {
-        throw new Error("Email must be a UB email (@ub.edu.bz)");
+      // 1️⃣ List all users in Supabase Auth
+      const { data: listResult, error: listError } =
+        await supabase.auth.admin.listUsers();
+      if (listError) throw listError;
+
+      // 2️⃣ Look for the UB email
+      const existingUser = listResult.users.find(
+        (u) => u.email?.toLowerCase() === email.toLowerCase()
+      );
+
+      // 3️⃣ User does not exist → must log in first
+      if (!existingUser) {
+        throw new Error(
+          "This UB email has never logged in before. Ask them to log in once using the magic link first."
+        );
       }
 
-      if (password.length < 6) {
-        throw new Error("Password must be at least 6 characters.");
-      }
+      const userId = existingUser.id;
 
-      // 🟦 2 — Create new user in Auth
-      const { data: authData, error: signUpError } =
-        await supabase.auth.signUp({
-          email,
-          password,
-        });
+      // 4️⃣ Update existing profile with new role
+      const { error: updateError } = await supabase
+        .from("profiles")
+        .update({ role })
+        .eq("id", userId);
 
-      if (signUpError) throw signUpError;
+      if (updateError) throw updateError;
 
-      const userId = authData.user?.id;
-      if (!userId) throw new Error("User ID missing from signup.");
-
-      // 🟩 3 — Insert into profiles table
-      const { error: profileError } = await supabase.from("profiles").insert({
-        id: userId,
-        email: email,
-        role: role,
-        full_name: email.split("@")[0], // optional placeholder
-      });
-
-      if (profileError) throw profileError;
-
-      // 🟧 4 — Optional: Add admin log
-      /*
-      await addLog({
-        action: "role_assigned",
-        performed_by: currentAdminId,
-        description: `Assigned ${role} role to ${email}`,
-      });
-      */
-
-      setMessage(`Success! ${email} is now registered as ${role}.`);
+      setMessage(`Success! ${email} is now assigned the role: ${role}.`);
       setEmail("");
-      setPassword("");
 
     } catch (err: any) {
       setMessage(err.message || "Something went wrong.");
@@ -72,19 +56,19 @@ export default function CreateAdminUserPage() {
     <div className="p-6 max-w-xl w-full mx-auto text-white">
       <h1 className="text-3xl font-bold mb-4">Create New Admin / Staff</h1>
       <p className="text-gray-400 mb-6">
-        Add a new user with UB email and assign their system role.
+        Promote an existing UB email account to admin or staff.
       </p>
 
       <form
         onSubmit={handleSubmit}
         className="space-y-4 bg-gray-900 p-6 rounded-xl border border-gray-700 shadow"
       >
-        {/* Email */}
+        {/* UB Email */}
         <div>
           <label className="block text-sm text-gray-300 mb-1">UB Email</label>
           <input
             type="email"
-            placeholder="example@ub.edu.bz"
+            placeholder="you@ub.edu.bz"
             className="w-full p-3 rounded bg-gray-800 border border-gray-700 focus:outline-none"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
@@ -92,22 +76,7 @@ export default function CreateAdminUserPage() {
           />
         </div>
 
-        {/* Password */}
-        <div>
-          <label className="block text-sm text-gray-300 mb-1">
-            Temporary Password
-          </label>
-          <input
-            type="password"
-            placeholder="Min. 6 characters"
-            className="w-full p-3 rounded bg-gray-800 border border-gray-700 focus:outline-none"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
-        </div>
-
-        {/* Role Dropdown */}
+        {/* Role Select */}
         <div>
           <label className="block text-sm text-gray-300 mb-1">Role</label>
           <select
@@ -126,7 +95,7 @@ export default function CreateAdminUserPage() {
           disabled={loading}
           className="bg-blue-600 hover:bg-blue-700 transition px-4 py-3 rounded w-full text-center font-semibold"
         >
-          {loading ? "Creating..." : "Create User"}
+          {loading ? "Processing..." : "Assign Role"}
         </button>
 
         {/* Message */}
