@@ -15,37 +15,36 @@ export default function CreateAdminUserPage() {
     setLoading(true);
 
     try {
-      // 1️⃣ Load all Supabase Auth users
-      const { data: userList, error: listErr } =
+      // 1️⃣ List all users in Supabase Auth
+      const { data: listResult, error: listError } =
         await supabase.auth.admin.listUsers();
+      if (listError) throw listError;
 
-      if (listErr) throw listErr;
-
-      // 2️⃣ Find user by email
-      const foundUser = userList.users.find(
+      // 2️⃣ Look for the UB email
+      const existingUser = listResult.users.find(
         (u) => u.email?.toLowerCase() === email.toLowerCase()
       );
 
-      if (!foundUser) {
+      // 3️⃣ User does not exist → must log in first
+      if (!existingUser) {
         throw new Error(
           "This UB email has never logged in before. Ask them to log in once using the magic link first."
         );
       }
 
-      const userId = foundUser.id;
+      const userId = existingUser.id;
 
-      // 3️⃣ Update their profile role (RLS will allow because you're admin)
-      const { error: updateErr } = await supabase
+      // 4️⃣ Update existing profile with new role
+      const { error: updateError } = await supabase
         .from("profiles")
         .update({ role })
         .eq("id", userId);
 
-      if (updateErr) throw updateErr;
+      if (updateError) throw updateError;
 
-      setMessage(
-        `Success! ${email} is now assigned the role: ${role.toUpperCase()}.`
-      );
+      setMessage(`Success! ${email} is now assigned the role: ${role}.`);
       setEmail("");
+
     } catch (err: any) {
       setMessage(err.message || "Something went wrong.");
     }
@@ -77,7 +76,7 @@ export default function CreateAdminUserPage() {
           />
         </div>
 
-        {/* Role Selector */}
+        {/* Role Select */}
         <div>
           <label className="block text-sm text-gray-300 mb-1">Role</label>
           <select
@@ -90,7 +89,7 @@ export default function CreateAdminUserPage() {
           </select>
         </div>
 
-        {/* Submit Button */}
+        {/* Submit */}
         <button
           type="submit"
           disabled={loading}
@@ -99,7 +98,7 @@ export default function CreateAdminUserPage() {
           {loading ? "Processing..." : "Assign Role"}
         </button>
 
-        {/* Status Message */}
+        {/* Message */}
         {message && (
           <p className="text-center mt-4 text-green-400 font-medium">
             {message}
