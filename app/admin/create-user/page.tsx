@@ -1,52 +1,53 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
 export default function CreateAdminUserPage() {
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [role, setRole] = useState("admin");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const [requesterId, setRequesterId] = useState<string | null>(null);
+
+  // Load logged-in user
+  useEffect(() => {
+    async function loadUser() {
+      const { data: { session } } = await supabase.auth.getSession();
+      setRequesterId(session?.user?.id || null);
+    }
+    loadUser();
+  }, []);
 
   async function handleSubmit(e: any) {
     e.preventDefault();
     setMessage("");
     setLoading(true);
 
+    if (!requesterId) {
+      setMessage("❌ Unable to verify your admin identity.");
+      setLoading(false);
+      return;
+    }
+
     try {
-      // 1️⃣ List all users in Supabase Auth
-      const { data: listResult, error: listError } =
-        await supabase.auth.admin.listUsers();
-      if (listError) throw listError;
+      const res = await fetch("/api/admin/create-user", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password, role, requesterId }),
+      });
 
-      // 2️⃣ Look for the UB email
-      const existingUser = listResult.users.find(
-        (u) => u.email?.toLowerCase() === email.toLowerCase()
-      );
+      const json = await res.json();
 
-      // 3️⃣ User does not exist → must log in first
-      if (!existingUser) {
-        throw new Error(
-          "This UB email has never logged in before. Ask them to log in once using the magic link first."
-        );
-      }
+      if (!res.ok) throw new Error(json.error);
 
-      const userId = existingUser.id;
-
-      // 4️⃣ Update existing profile with new role
-      const { error: updateError } = await supabase
-        .from("profiles")
-        .update({ role })
-        .eq("id", userId);
-
-      if (updateError) throw updateError;
-
-      setMessage(`Success! ${email} is now assigned the role: ${role}.`);
+      setMessage(`✅ Successfully created account for ${email} with role: ${role}`);
       setEmail("");
+      setPassword("");
 
     } catch (err: any) {
-      setMessage(err.message || "Something went wrong.");
+      setMessage(`❌ ${err.message}`);
     }
 
     setLoading(false);
@@ -56,19 +57,19 @@ export default function CreateAdminUserPage() {
     <div className="p-6 max-w-xl w-full mx-auto text-white">
       <h1 className="text-3xl font-bold mb-4">Create New Admin / Staff</h1>
       <p className="text-gray-400 mb-6">
-        Promote an existing UB email account to admin or staff.
+        Create a new admin or staff account with email + password.
       </p>
 
       <form
         onSubmit={handleSubmit}
         className="space-y-4 bg-gray-900 p-6 rounded-xl border border-gray-700 shadow"
       >
-        {/* UB Email */}
+        {/* Email */}
         <div>
-          <label className="block text-sm text-gray-300 mb-1">UB Email</label>
+          <label className="block text-sm text-gray-300 mb-1">Email</label>
           <input
             type="email"
-            placeholder="you@ub.edu.bz"
+            placeholder="user@example.com"
             className="w-full p-3 rounded bg-gray-800 border border-gray-700 focus:outline-none"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
@@ -76,7 +77,20 @@ export default function CreateAdminUserPage() {
           />
         </div>
 
-        {/* Role Select */}
+        {/* Password */}
+        <div>
+          <label className="block text-sm text-gray-300 mb-1">Password</label>
+          <input
+            type="password"
+            placeholder="Set user password"
+            className="w-full p-3 rounded bg-gray-800 border border-gray-700 focus:outline-none"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+          />
+        </div>
+
+        {/* Role */}
         <div>
           <label className="block text-sm text-gray-300 mb-1">Role</label>
           <select
@@ -95,12 +109,16 @@ export default function CreateAdminUserPage() {
           disabled={loading}
           className="bg-blue-600 hover:bg-blue-700 transition px-4 py-3 rounded w-full text-center font-semibold"
         >
-          {loading ? "Processing..." : "Assign Role"}
+          {loading ? "Creating..." : "Create User"}
         </button>
 
         {/* Message */}
         {message && (
-          <p className="text-center mt-4 text-green-400 font-medium">
+          <p
+            className={`text-center mt-4 font-medium ${
+              message.startsWith("✅") ? "text-green-400" : "text-red-400"
+            }`}
+          >
             {message}
           </p>
         )}
