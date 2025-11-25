@@ -7,230 +7,230 @@ import { supabase } from "@/lib/supabaseClient";
 export const runtime = "nodejs";
 
 export default function LoginPage() {
-  const router = useRouter();
-
-  const [mode, setMode] = useState<"student" | "admin">("student");
-
   const [email, setEmail] = useState("");
-  const [adminEmail, setAdminEmail] = useState("admin@system.local");
+  const [adminMode, setAdminMode] = useState(false);
   const [adminPassword, setAdminPassword] = useState("");
-
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const router = useRouter();
 
-  // ------------------------------------------------------
-  // 🔥 AUTO-REDIRECT IF ALREADY LOGGED IN
-  // ------------------------------------------------------
+  // 🔥 AUTO-REDIRECT IF LOGGED IN
   useEffect(() => {
     async function redirectIfLoggedIn() {
       const {
         data: { session },
       } = await supabase.auth.getSession();
 
+      // ❌ Not logged in → stay here
       if (!session) return;
 
       const user = session.user;
 
-      // ⭐ FIXED — use EMAIL instead of user.id
+      // 🔥 Fetch profile safely (NO .single())
       const { data: profile } = await supabase
         .from("profiles")
         .select("role")
-        .eq("email", user.email)
+        .eq("id", user.id)
         .maybeSingle();
 
-      if (!profile) return;
-
-      if (profile.role === "admin") {
+      // 🔥 Admin → redirect
+      if (profile?.role === "admin") {
         router.replace("/admin");
         return;
       }
 
-      router.replace("/items");
+      // 🔥 Regular user → redirect
+      if (profile?.role === "user") {
+        router.replace("/items");
+        return;
+      }
+
+      // If no profile yet, do nothing
+      // (middleware will inject later)
     }
 
     redirectIfLoggedIn();
   }, [router]);
 
-  // ------------------------------------------------------
-  // 🎓 STUDENT MAGIC LINK LOGIN
-  // ------------------------------------------------------
-  async function handleStudentLogin(e: any) {
+  // ──────────────────────────────────────────────
+  // UB EMAIL LOGIN
+  // ──────────────────────────────────────────────
+
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setMessage("");
 
-    const trimmed = email.trim().toLowerCase();
+    const trimmedEmail = email.trim().toLowerCase();
 
-    if (!trimmed.endsWith("@ub.edu.bz")) {
-      setMessage("❌ Use your @ub.edu.bz student email.");
+    // Switch to admin login mode
+    if (trimmedEmail === "admin" || trimmedEmail === "admin@system.local") {
+      setAdminMode(true);
       setLoading(false);
       return;
     }
 
+    // Validate UB email
+    if (!trimmedEmail.endsWith("@ub.edu.bz")) {
+      setMessage("❌ Please use your UB email address or type 'admin'");
+      setLoading(false);
+      return;
+    }
+
+    // Magic link login
     const { error } = await supabase.auth.signInWithOtp({
-      email: trimmed,
-      options: {
-        emailRedirectTo: `${location.origin}/auth/callback`,
-      },
+      email: trimmedEmail,
+      options: { emailRedirectTo: `${location.origin}/auth/callback` },
     });
 
-    if (error) setMessage("❌ " + error.message);
-    else setMessage("✅ Check your UB email for the login link.");
+    if (error) setMessage(`❌ ${error.message}`);
+    else setMessage("✅ Check your UB email for a login link!");
 
     setLoading(false);
-  }
+  };
 
-  // ------------------------------------------------------
-  // 🛡️ ADMIN LOGIN
-  // ------------------------------------------------------
-  async function handleAdminLogin(e: any) {
-  e.preventDefault();
-  setLoading(true);
-  setMessage("");
+  // ──────────────────────────────────────────────
+  // ADMIN LOGIN (PASSWORD)
+  // ──────────────────────────────────────────────
 
-  let emailToUse = adminEmail;
+  const handleAdminLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setMessage("");
 
-  // ⭐ If user types just "admin", convert to admin@system.local
-  if (adminEmail.trim().toLowerCase() === "admin") {
-    emailToUse = "admin@system.local";
-  }
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: "admin@system.local",
+        password: adminPassword,
+      });
 
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email: emailToUse,
-    password: adminPassword,
-  });
+      if (error) {
+        setMessage("❌ " + error.message);
+        setLoading(false);
+        return;
+      }
 
-  if (error) {
-    setMessage("❌ Incorrect admin credentials.");
-    setLoading(false);
-    return;
-  }
+      // Verify admin role
+      const { data: profile, error: profileErr } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("email", "admin@system.local")
+        .maybeSingle();
 
-  // Retrieve role from profiles
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role, superadmin")
-    .eq("email", emailToUse)
-    .maybeSingle();
+      if (profileErr || !profile || profile.role !== "admin") {
+        setMessage("❌ Unauthorized: not an admin account");
+        await supabase.auth.signOut();
+        setLoading(false);
+        return;
+      }
 
-  if (!profile || (profile.role !== "admin" && profile.superadmin !== true)) {
-    setMessage("❌ Unauthorized — not an admin account.");
-    await supabase.auth.signOut();
-    setLoading(false);
-    return;
-  }
+      // Store fallback session
+      if (data.session) {
+        localStorage.setItem("isManualAdmin", "true");
+        localStorage.setItem("adminSession", JSON.stringify(data.session));
+        localStorage.setItem("userRole", "admin");
+      }
 
-  setMessage("✅ Welcome Admin! Redirecting...");
-  setTimeout(() => router.replace("/admin"), 800);
-}
-  // ------------------------------------------------------
+      setMessage("✅ Welcome, Admin! Redirecting...");
+      setTimeout(() => router.push("/admin"), 700);
+    } catch {
+      setMessage("❌ Login error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ──────────────────────────────────────────────
   // UI
-  // ------------------------------------------------------
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-900 px-5">
-      <div className="w-full max-w-md bg-gray-800 border border-gray-700 rounded-2xl p-8 shadow-lg">
+  // ──────────────────────────────────────────────
 
-        <h1 className="text-2xl font-bold text-center text-white mb-2">
+  return (
+    <div className="flex flex-col items-center justify-center min-h-screen bg-gray-50 dark:bg-gray-900 px-4">
+      <div className="w-full max-w-md bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-2xl shadow-md p-8">
+        <h1 className="text-2xl font-bold text-center mb-2 text-gray-900 dark:text-gray-100">
           Jaguar Track Login
         </h1>
 
-        <p className="text-center text-gray-400 text-sm mb-6">
-          {mode === "student"
-            ? "Sign in using your @ub.edu.bz email."
-            : "Admin access requires email + password."}
+        <p className="text-sm text-gray-600 dark:text-gray-400 text-center mb-6">
+          Sign in using your <strong>@ub.edu.bz</strong> email,  
+          or log in as <strong>admin</strong>.
         </p>
 
-        {/* Mode Toggle */}
-        <div className="flex mb-6">
-          <button
-            onClick={() => {
-              setMode("student");
-              setMessage("");
-            }}
-            className={`flex-1 py-2 rounded-l-lg font-semibold ${
-              mode === "student"
-                ? "bg-ubBlue text-white"
-                : "bg-gray-700 text-gray-300"
-            }`}
-          >
-            Student Login
-          </button>
-
-          <button
-            onClick={() => {
-              setMode("admin");
-              setMessage("");
-            }}
-            className={`flex-1 py-2 rounded-r-lg font-semibold ${
-              mode === "admin"
-                ? "bg-red-600 text-white"
-                : "bg-gray-700 text-gray-300"
-            }`}
-          >
-            Admin Login
-          </button>
-        </div>
-
-        {/* Student Login */}
-        {mode === "student" && (
-          <form onSubmit={handleStudentLogin} className="space-y-4">
+        {/* ────────────────────────── */}
+        {/* UB EMAIL LOGIN FORM       */}
+        {/* ────────────────────────── */}
+        {!adminMode ? (
+          <form onSubmit={handleLogin} className="space-y-4">
             <input
-              type="email"
+              type="text"
               value={email}
+              placeholder="you@ub.edu.bz or type 'admin'"
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@ub.edu.bz"
               required
-              className="w-full p-3 rounded-lg bg-gray-900 text-white border border-gray-700"
+              className="w-full p-3 rounded-lg border dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100"
             />
 
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3 bg-ubBlue hover:bg-blue-700 text-white font-semibold rounded-lg"
+              className={`w-full py-3 rounded-lg font-medium text-white ${
+                loading
+                  ? "bg-blue-400 cursor-not-allowed"
+                  : "bg-ubBlue hover:bg-blue-700"
+              }`}
             >
-              {loading ? "Sending..." : "Send Magic Link"}
+              {loading ? "Processing..." : "Continue"}
             </button>
           </form>
-        )}
-
-        {/* Admin Login */}
-        {mode === "admin" && (
+        ) : (
+          // ──────────────────────────
+          // ADMIN LOGIN FORM
+          // ──────────────────────────
           <form onSubmit={handleAdminLogin} className="space-y-4">
             <input
-              type="email"
-              value={adminEmail}
-              onChange={(e) => setAdminEmail(e.target.value)}
-              placeholder="admin email"
-              required
-              className="w-full p-3 rounded-lg bg-gray-900 text-white border border-gray-700"
-            />
-
-            <input
               type="password"
+              placeholder="Enter admin password"
               value={adminPassword}
               onChange={(e) => setAdminPassword(e.target.value)}
-              placeholder="Admin password"
               required
-              className="w-full p-3 rounded-lg bg-gray-900 text-white border border-gray-700"
+              className="w-full p-3 rounded-lg border dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100"
             />
 
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg"
+              className={`w-full py-3 rounded-lg font-medium ${
+                loading
+                  ? "bg-red-400 cursor-not-allowed"
+                  : "bg-red-600 hover:bg-red-700 text-white"
+              }`}
             >
               {loading ? "Checking..." : "Login as Admin"}
             </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setAdminMode(false);
+                setEmail("");
+                setMessage("");
+              }}
+              className="w-full py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-blue-500"
+            >
+              ← Back to regular login
+            </button>
           </form>
         )}
 
-        {/* Message / Feedback */}
+        {/* FEEDBACK */}
         {message && (
           <p
-            className={`mt-5 text-center font-medium text-sm ${
+            className={`mt-4 text-center text-sm font-medium ${
               message.startsWith("✅")
-                ? "text-green-400"
-                : "text-red-400"
+                ? "text-green-600"
+                : message.startsWith("❌")
+                ? "text-red-600"
+                : "text-yellow-600"
             }`}
           >
             {message}
