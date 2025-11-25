@@ -84,39 +84,49 @@ export default function LoginPage() {
   // 🛡️ ADMIN LOGIN
   // ------------------------------------------------------
   async function handleAdminLogin(e: any) {
-    e.preventDefault();
-    setLoading(true);
-    setMessage("");
+  e.preventDefault();
+  setLoading(true);
+  setMessage("");
 
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: adminEmail,
-      password: adminPassword,
-    });
+  const { data: authData, error } = await supabase.auth.signInWithPassword({
+    email: adminEmail,
+    password: adminPassword,
+  });
 
-    if (error) {
-      setMessage("❌ Incorrect admin email or password.");
-      setLoading(false);
-      return;
-    }
-
-    // ⭐ Confirm true admin role
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("role")
-      .eq("email", adminEmail)
-      .maybeSingle();
-
-    if (!profile || profile.role !== "admin") {
-      setMessage("❌ Unauthorized — not an admin account.");
-      await supabase.auth.signOut();
-      setLoading(false);
-      return;
-    }
-
-    setMessage("✅ Welcome Admin! Redirecting...");
-    setTimeout(() => router.replace("/admin"), 600);
+  if (error) {
+    setMessage("❌ Incorrect admin email or password.");
+    setLoading(false);
+    return;
   }
 
+  // ⭐ FIXED: check BOTH role and superadmin
+  const { data: profile, error: profileErr } = await supabase
+    .from("profiles")
+    .select("role, superadmin")
+    .eq("email", adminEmail)
+    .maybeSingle();
+
+  if (profileErr || !profile) {
+    setMessage("❌ Could not read admin profile (RLS blocked).");
+    await supabase.auth.signOut();
+    setLoading(false);
+    return;
+  }
+
+  // ⭐ Final correct validation
+  const isAdmin =
+    profile.role === "admin" || profile.superadmin === true;
+
+  if (!isAdmin) {
+    setMessage("❌ Unauthorized — not an admin account.");
+    await supabase.auth.signOut();
+    setLoading(false);
+    return;
+  }
+
+  setMessage("✅ Welcome Admin! Redirecting...");
+  setTimeout(() => router.replace("/admin"), 600);
+}
   // ------------------------------------------------------
   // UI
   // ------------------------------------------------------
