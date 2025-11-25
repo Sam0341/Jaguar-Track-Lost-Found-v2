@@ -88,36 +88,32 @@ export default function LoginPage() {
   setLoading(true);
   setMessage("");
 
-  const { data: authData, error } = await supabase.auth.signInWithPassword({
-    email: adminEmail,
+  let emailToUse = adminEmail;
+
+  // ⭐ If user types just "admin", convert to admin@system.local
+  if (adminEmail.trim().toLowerCase() === "admin") {
+    emailToUse = "admin@system.local";
+  }
+
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email: emailToUse,
     password: adminPassword,
   });
 
   if (error) {
-    setMessage("❌ Incorrect admin email or password.");
+    setMessage("❌ Incorrect admin credentials.");
     setLoading(false);
     return;
   }
 
-  // ⭐ FIXED: check BOTH role and superadmin
-  const { data: profile, error: profileErr } = await supabase
+  // Retrieve role from profiles
+  const { data: profile } = await supabase
     .from("profiles")
     .select("role, superadmin")
-    .eq("email", adminEmail)
+    .eq("email", emailToUse)
     .maybeSingle();
 
-  if (profileErr || !profile) {
-    setMessage("❌ Could not read admin profile (RLS blocked).");
-    await supabase.auth.signOut();
-    setLoading(false);
-    return;
-  }
-
-  // ⭐ Final correct validation
-  const isAdmin =
-    profile.role === "admin" || profile.superadmin === true;
-
-  if (!isAdmin) {
+  if (!profile || (profile.role !== "admin" && profile.superadmin !== true)) {
     setMessage("❌ Unauthorized — not an admin account.");
     await supabase.auth.signOut();
     setLoading(false);
@@ -125,7 +121,7 @@ export default function LoginPage() {
   }
 
   setMessage("✅ Welcome Admin! Redirecting...");
-  setTimeout(() => router.replace("/admin"), 600);
+  setTimeout(() => router.replace("/admin"), 800);
 }
   // ------------------------------------------------------
   // UI
