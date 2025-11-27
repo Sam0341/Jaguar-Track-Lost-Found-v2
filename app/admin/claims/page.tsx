@@ -89,72 +89,70 @@ const fetchClaims = async () => {
   setErrorMsg(null);
 
   try {
-    const { data, error } = await supabase
+    const { data: claimRows, error: claimErr } = await supabase
       .from("claims")
-      .select(`
-        id,
-        message,
-        status,
-        created_at,
-
-        -- 👤 USER WHO CLAIMED IT
-        profiles:claimed_by (
-          id,
-          full_name,
-          email
-        ),
-
-        -- 📦 ITEM DETAILS
-        item:items (
-          id,
-          name,
-          description,
-          image,
-          location,
-          campus_id,
-          category_id
-        ),
-
-        -- 🏫 CAMPUS
-        campus:items!inner (
-          campus:campuses(name)
-        ),
-
-        -- 🏷 CATEGORY
-        category:items!inner (
-          category:categories(name)
-        )
-      `)
+      .select("*")
       .order("created_at", { ascending: false });
 
-    if (error) throw error;
+    if (claimErr) throw claimErr;
 
-    const final: ClaimView[] = data.map((row: any) => {
-      let imageUrl = null;
+    const final: ClaimView[] = [];
 
-      if (row.item?.image) {
+    for (const row of claimRows as ClaimRow[]) {
+      const { data: item } = await supabase
+        .from("items")
+        .select("*")
+        .eq("id", row.item_id)
+        .maybeSingle();  // ⭐ safer than .single()
+
+      // ⭐ FIXED USER: Load the person WHO MADE THE CLAIM
+      const { data: user } = await supabase
+        .from("profiles")
+        .select("id, full_name, email")
+        .eq("id", row.claimed_by)
+        .maybeSingle(); // ⭐ prevents crash & shows correct user
+
+      const { data: campus } =
+        item?.campus_id
+          ? await supabase
+              .from("campuses")
+              .select("name")
+              .eq("id", item.campus_id)
+              .maybeSingle()
+          : { data: null };
+
+      const { data: category } =
+        item?.category_id
+          ? await supabase
+              .from("categories")
+              .select("name")
+              .eq("id", item.category_id)
+              .maybeSingle()
+          : { data: null };
+
+      let imageUrl: string | null = null;
+      if (item?.image) {
         const { data: url } = supabase.storage
           .from("item-photos")
-          .getPublicUrl(row.item.image);
+          .getPublicUrl(item.image);
         imageUrl = url?.publicUrl || null;
       }
 
-      return {
+      final.push({
         id: row.id,
         message: row.message,
         status: row.status,
         created_at: row.created_at,
-
-        item: row.item
-          ? { ...row.item, image: imageUrl }
-          : null,
-
-        user: row.profiles || null, // 🎯 FIX: this shows CLAIMING USER
-
-        campus: row.campus?.campus?.name || null,
-        category: row.category?.category?.name || null,
-      };
-    });
+        item:
+          item && {
+            ...item,
+            image: imageUrl,
+          },
+        user,
+        campus: campus?.name || null,
+        category: category?.name || null,
+      });
+    }
 
     setClaims(final);
   } catch (err: any) {
