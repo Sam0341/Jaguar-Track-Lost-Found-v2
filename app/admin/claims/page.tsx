@@ -85,6 +85,7 @@ export default function AdminClaimsPage() {
 
   /* ========================= FETCH ALL CLAIMS ========================= */
   /* ========================= FETCH ALL CLAIMS ========================= */
+/* ========================= FETCH ALL CLAIMS ========================= */
 const fetchClaims = async () => {
   setErrorMsg(null);
 
@@ -99,41 +100,46 @@ const fetchClaims = async () => {
     const final: ClaimView[] = [];
 
     for (const row of claimRows as ClaimRow[]) {
-      // 1. Load item
+      
+      /* ----------- Fetch Item ----------- */
       const { data: item } = await supabase
         .from("items")
         .select("*")
         .eq("id", row.item_id)
         .single();
 
-      // 2. Load the USER WHO MADE THE CLAIM (real user)
-      const { data: user } = await supabase
-        .from("profiles")
-        .select("id, full_name, email")
-        .eq("id", row.claimed_by)   // ← correct: claim owner
-        .single();
+      /* ----------- Fetch User (CLAIMER, not reporter) ----------- */
+      let user: ProfileData | null = null;
+      if (row.claimed_by) {
+        const { data: userData } = await supabase
+          .from("profiles")
+          .select("id, full_name, email")
+          .eq("id", row.claimed_by)
+          .maybeSingle(); // ⭐ prevents crash
+        user = userData;
+      }
 
-      // 3. Load campus
+      /* ----------- Fetch Campus ----------- */
       const { data: campus } =
         item?.campus_id
           ? await supabase
               .from("campuses")
               .select("name")
               .eq("id", item.campus_id)
-              .single()
+              .maybeSingle()
           : { data: null };
 
-      // 4. Load category
+      /* ----------- Fetch Category ----------- */
       const { data: category } =
         item?.category_id
           ? await supabase
               .from("categories")
               .select("name")
               .eq("id", item.category_id)
-              .single()
+              .maybeSingle()
           : { data: null };
 
-      // 5. Image fix
+      /* ----------- Build Image URL ----------- */
       let imageUrl: string | null = null;
       if (item?.image) {
         const { data: url } = supabase.storage
@@ -142,6 +148,7 @@ const fetchClaims = async () => {
         imageUrl = url?.publicUrl || null;
       }
 
+      /* ----------- PUSH CLEAN DATA ----------- */
       final.push({
         id: row.id,
         message: row.message,
@@ -152,7 +159,7 @@ const fetchClaims = async () => {
             ...item,
             image: imageUrl,
           },
-        user, // ← correct user is always the claimant
+        user, // ⭐ correct claimer
         campus: campus?.name || null,
         category: category?.name || null,
       });
@@ -166,6 +173,7 @@ const fetchClaims = async () => {
     setLoading(false);
   }
 };
+
   /* ========================= REALTIME CLAIM UPDATES ========================= */
   useEffect(() => {
   const channel = supabase
