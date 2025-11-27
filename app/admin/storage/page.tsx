@@ -10,16 +10,15 @@ type Item = {
   campus: string | null;
   location: string | null;
   status: string;
-
   description?: string;
   image?: string;
   reported_at?: string;
-  claimed_at?: string;
-
+  reporter_name?: string;
   dropoff_location?: string;
 
-  dropper?: { full_name: string | null } | null; // profiles!dropoff_by
-  picker?: { full_name: string | null } | null;  // profiles!pickup_by
+  // NEW FIELDS
+  claimed_at?: string;
+  pickup_by?: string;
 };
 
 export default function StoragePage() {
@@ -47,7 +46,7 @@ export default function StoragePage() {
   });
 
   // ---------------------------------------------------------
-  // Fetch items with JOIN to profiles
+  // Fetch items
   // ---------------------------------------------------------
   useEffect(() => {
     fetchItems();
@@ -58,26 +57,24 @@ export default function StoragePage() {
 
     const { data, error } = await supabase
       .from("items")
-      .select(`
-        *,
-        dropper:profiles!dropoff_by(full_name),
-        picker:profiles!pickup_by(full_name)
-      `)
+      .select("*")
       .order("reported_at", { ascending: false });
 
     if (!error && data) {
-      const onlyStored = data.filter(
+      const foundItems = data.filter(
         (i) => i.status === "Found" || i.status === "Claimed"
       );
 
-      setItems(onlyStored);
-      setFilteredItems(onlyStored);
-      calculateStats(onlyStored);
+      setItems(foundItems);
+      setFilteredItems(foundItems);
+      calculateStats(foundItems);
     }
 
     setLoading(false);
   }
 
+  // ---------------------------------------------------------
+  // Stats
   // ---------------------------------------------------------
   function calculateStats(data: Item[]) {
     const storages = new Set(data.map((i) => i.location || "N/A"));
@@ -87,6 +84,8 @@ export default function StoragePage() {
     });
   }
 
+  // ---------------------------------------------------------
+  // Filters
   // ---------------------------------------------------------
   useEffect(() => {
     let data = [...items];
@@ -114,6 +113,8 @@ export default function StoragePage() {
   }, [searchTerm, campusFilter, statusFilter, storageFilter, items]);
 
   // ---------------------------------------------------------
+  // Update Storage Location
+  // ---------------------------------------------------------
   async function updateStorage() {
     if (!selectedItem) return;
 
@@ -140,31 +141,33 @@ export default function StoragePage() {
   }
 
   // ---------------------------------------------------------
-  // FIXED: Correct Claimed Logic
+  // Mark Item as Claimed (FIXED VERSION)
   // ---------------------------------------------------------
   async function markAsClaimed(id: string) {
     const user = (await supabase.auth.getUser()).data.user;
 
-    const { data: claim, error: claimErr } = await supabase
+    // Get claim and join profile full name
+    const { data: claim, error: claimError } = await supabase
       .from("claims")
-      .select("claimed_by")
+      .select("claimed_by, profiles(full_name)")
       .eq("item_id", id)
       .single();
 
-    if (claimErr || !claim) {
+    if (claimError || !claim) {
       showToast("No claim found for this item!", "error");
       return;
     }
 
     const claimerId = claim.claimed_by;
+    const claimerName = claim.profiles?.[0]?.full_name || "Unknown";
 
     const { error } = await supabase
       .from("items")
       .update({
         status: "Claimed",
         claimed_by: claimerId,
-        pickup_by: claimerId,
         claimed_at: new Date().toISOString(),
+        pickup_by: claimerName,
       })
       .eq("id", id);
 
@@ -182,6 +185,8 @@ export default function StoragePage() {
     }
   }
 
+  // ---------------------------------------------------------
+  // Delete Item
   // ---------------------------------------------------------
   async function deleteItem(id: string) {
     if (!confirm("Delete this item?")) return;
@@ -205,7 +210,7 @@ export default function StoragePage() {
   }
 
   // ---------------------------------------------------------
-  // CSV Export
+  // CSV Export (updated)
   // ---------------------------------------------------------
   function downloadCSV() {
     const headers = [
@@ -225,8 +230,8 @@ export default function StoragePage() {
       [
         i.id,
         `"${i.name}"`,
-        `"${i.dropper?.full_name || "N/A"}"`,
-        `"${i.picker?.full_name || "N/A"}"`,
+        `"${i.reporter_name || "N/A"}"`,
+        `"${i.pickup_by || "N/A"}"`,
         i.category || "",
         i.campus || "",
         i.location || "N/A",
@@ -237,6 +242,7 @@ export default function StoragePage() {
     );
 
     const csv = [headers, ...rows].join("\n");
+
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
 
@@ -265,14 +271,13 @@ export default function StoragePage() {
   );
 
   // ---------------------------------------------------------
-  // RENDER PAGE
+  // Render Page
   // ---------------------------------------------------------
   return (
     <div className="p-6 max-w-7xl mx-auto">
-      <h1 className="text-3xl font-bold text-ubGold mb-6">
-        📦 Storage Inventory
-      </h1>
+      <h1 className="text-3xl font-bold text-ubGold mb-6">📦 Storage Inventory</h1>
 
+      {/* CSV Button */}
       <button
         onClick={downloadCSV}
         className="mb-6 px-4 py-2 bg-ubGold text-black font-semibold rounded shadow hover:bg-yellow-400"
@@ -280,10 +285,11 @@ export default function StoragePage() {
         ⬇ Download Storage CSV
       </button>
 
+      {/* Item Grid */}
       {loading ? (
         <p className="text-gray-300 text-center py-10">Loading...</p>
       ) : filteredItems.length === 0 ? (
-        <p className="text-gray-400 text-center">No storage items found.</p>
+        <p className="text-gray-400 text-center">No items found.</p>
       ) : (
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
           {paginatedItems.map((item) => (
@@ -303,23 +309,17 @@ export default function StoragePage() {
                 />
               )}
 
-              <h2 className="font-bold text-lg text-ubBlue dark:text-ubGold">
-                {item.name}
-              </h2>
+              <h2 className="font-bold text-lg text-ubBlue dark:text-ubGold">{item.name}</h2>
 
               <p className="text-sm text-gray-400">{item.category}</p>
 
-              <p className="text-sm text-gray-300">
-                Dropoff By: {item.dropper?.full_name || "N/A"}
-              </p>
+              <p className="text-sm text-gray-300">Drop-Off: {item.dropoff_location || "N/A"}</p>
 
-              <p className="text-sm text-gray-300">
-                Pickup By: {item.picker?.full_name || "N/A"}
-              </p>
+              {item.pickup_by && (
+                <p className="text-sm text-gray-300">Pickup By: {item.pickup_by}</p>
+              )}
 
-              <p className="text-sm text-gray-300">
-                Storage: {item.location || "N/A"}
-              </p>
+              <p className="text-sm text-gray-300">Storage: {item.location || "N/A"}</p>
 
               <span
                 className={`inline-block mt-2 px-2 py-1 text-xs rounded ${
@@ -354,7 +354,7 @@ export default function StoragePage() {
         </div>
       )}
 
-      {/* MODAL */}
+      {/* Modal */}
       {showModal && selectedItem && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4">
           <div className="bg-white dark:bg-gray-900 p-6 rounded-lg max-w-lg w-full relative border border-gray-700">
@@ -365,9 +365,7 @@ export default function StoragePage() {
               ✕
             </button>
 
-            <h2 className="text-2xl font-bold text-ubBlue dark:text-ubGold">
-              {selectedItem.name}
-            </h2>
+            <h2 className="text-2xl font-bold text-ubBlue dark:text-ubGold">{selectedItem.name}</h2>
 
             <p className="text-gray-300 mb-2">
               Category: {selectedItem.category} | Campus: {selectedItem.campus}
@@ -380,13 +378,16 @@ export default function StoragePage() {
               className="w-full px-3 py-2 border rounded bg-gray-800 text-gray-200"
             />
 
-            <p className="mt-3 mb-1 text-gray-300">
-              Drop-Off By: {selectedItem.dropper?.full_name || "N/A"}
-            </p>
-
-            <p className="mt-3 mb-1 text-gray-300">
-              Pickup By: {selectedItem.picker?.full_name || "N/A"}
-            </p>
+            {selectedItem.pickup_by && (
+              <>
+                <p className="mt-3 mb-1 text-gray-300">Pickup By:</p>
+                <input
+                  disabled
+                  value={selectedItem.pickup_by}
+                  className="w-full px-3 py-2 border rounded bg-gray-800 text-gray-200"
+                />
+              </>
+            )}
 
             <p className="mt-4 mb-1 text-gray-300">Current Storage:</p>
             <input
