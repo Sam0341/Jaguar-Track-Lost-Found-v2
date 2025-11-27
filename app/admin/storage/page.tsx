@@ -6,19 +6,25 @@ import { supabase } from "@/lib/supabaseClient";
 type Item = {
   id: string;
   name: string;
-  category: string | null;
-  campus: string | null;
-  location: string | null;
-  status: string;
   description?: string;
   image?: string;
+
+  status: string;
+  location: string | null;
+
   reported_at?: string;
-  reporter_name?: string;
+  claimed_at?: string;
+
   dropoff_location?: string;
 
-  // NEW FIELDS
-  claimed_at?: string;
-  pickup_by?: string;
+  category_id?: string;
+  campus_id?: string;
+
+  category_name?: string;
+  campus_name?: string;
+
+  dropper?: { full_name: string | null } | null; // profiles!dropoff_by
+  picker?: { full_name: string | null } | null;  // profiles!pickup_by
 };
 
 export default function StoragePage() {
@@ -35,19 +41,15 @@ export default function StoragePage() {
   const [showModal, setShowModal] = useState(false);
 
   const [newStorage, setNewStorage] = useState("");
+
   const [toast, setToast] = useState<{ msg: string; type: string } | null>(null);
 
   const [page, setPage] = useState(1);
   const PER_PAGE = 8;
 
-  const [stats, setStats] = useState({
-    storages: 0,
-    totalStorageItems: 0,
-  });
-
-  // ---------------------------------------------------------
-  // Fetch items
-  // ---------------------------------------------------------
+  // ----------------------------------------
+  // FETCH STORAGE ITEMS
+  // ----------------------------------------
   useEffect(() => {
     fetchItems();
   }, []);
@@ -57,161 +59,145 @@ export default function StoragePage() {
 
     const { data, error } = await supabase
       .from("items")
-      .select("*")
+      .select(`
+        *,
+        categories:category_id(name),
+        campuses:campus_id(name),
+        dropper:profiles!dropoff_by(full_name),
+        picker:profiles!pickup_by(full_name)
+      `)
       .order("reported_at", { ascending: false });
 
-    if (!error && data) {
-      const foundItems = data.filter(
-        (i) => i.status === "Found" || i.status === "Claimed"
-      );
-
-      setItems(foundItems);
-      setFilteredItems(foundItems);
-      calculateStats(foundItems);
+    if (error) {
+      console.error("Fetch error:", error);
+      setLoading(false);
+      return;
     }
 
+    const stored = (data || []).filter(
+      (i: any) => i.status === "Found" || i.status === "Claimed"
+    );
+
+    const mapped = stored.map((i: any) => ({
+      ...i,
+      category_name: i.categories?.name || null,
+      campus_name: i.campuses?.name || null,
+    }));
+
+    setItems(mapped);
+    setFilteredItems(mapped);
     setLoading(false);
   }
 
-  // ---------------------------------------------------------
-  // Stats
-  // ---------------------------------------------------------
-  function calculateStats(data: Item[]) {
-    const storages = new Set(data.map((i) => i.location || "N/A"));
-    setStats({
-      storages: storages.size,
-      totalStorageItems: data.length,
-    });
-  }
-
-  // ---------------------------------------------------------
-  // Filters
-  // ---------------------------------------------------------
+  // ----------------------------------------
+  // FILTERING
+  // ----------------------------------------
   useEffect(() => {
     let data = [...items];
 
-    if (campusFilter !== "All")
-      data = data.filter((i) => i.campus === campusFilter);
+    if (campusFilter !== "All") {
+      data = data.filter((i) => i.campus_name === campusFilter);
+    }
 
-    if (statusFilter !== "All")
+    if (statusFilter !== "All") {
       data = data.filter((i) => i.status === statusFilter);
+    }
 
-    if (storageFilter !== "All")
+    if (storageFilter !== "All") {
       data = data.filter((i) => (i.location || "N/A") === storageFilter);
+    }
 
     if (searchTerm.trim()) {
       const t = searchTerm.toLowerCase();
       data = data.filter(
         (i) =>
           i.name.toLowerCase().includes(t) ||
-          (i.location || "").toLowerCase().includes(t) ||
-          (i.campus || "").toLowerCase().includes(t)
+          (i.category_name || "").toLowerCase().includes(t) ||
+          (i.campus_name || "").toLowerCase().includes(t) ||
+          (i.location || "").toLowerCase().includes(t)
       );
     }
 
     setFilteredItems(data);
-  }, [searchTerm, campusFilter, statusFilter, storageFilter, items]);
+  }, [items, searchTerm, campusFilter, statusFilter, storageFilter]);
 
-  // ---------------------------------------------------------
-  // Update Storage Location
-  // ---------------------------------------------------------
+  // ----------------------------------------
+  // MARK AS CLAIMED
+  // ----------------------------------------
+  async function markAsClaimed(id: string) {
+    const user = (await supabase.auth.getUser()).data.user;
+
+    const { data: claim } = await supabase
+      .from("claims")
+      .select("claimed_by")
+      .eq("item_id", id)
+      .maybeSingle();
+
+    if (!claim) {
+      showToast("No claim exists for this item!", "error");
+      return;
+    }
+
+    const claimerId = claim.claimed_by;
+
+    const { error } = await supabase
+      .from("items")
+      .update({
+        status: "Claimed",
+        pickup_by: claimerId,
+        claimed_by: claimerId,
+        claimed_at: new Date().toISOString(),
+      })
+      .eq("id", id);
+
+    if (error) {
+      showToast("Failed to update claim!", "error");
+      return;
+    }
+
+    showToast("Marked as claimed!", "success");
+    fetchItems();
+  }
+
+  // ----------------------------------------
+  // UPDATE STORAGE
+  // ----------------------------------------
   async function updateStorage() {
     if (!selectedItem) return;
-
-    const user = (await supabase.auth.getUser()).data.user;
 
     const { error } = await supabase
       .from("items")
       .update({ location: newStorage })
       .eq("id", selectedItem.id);
 
-    if (!error) {
-      await supabase.from("logs").insert({
-        action: "storage_updated",
-        item_id: selectedItem.id,
-        performed_by: user?.id,
-      });
-
-      showToast("Storage updated!", "success");
-      setShowModal(false);
-      fetchItems();
-    } else {
+    if (error) {
       showToast("Failed to update storage!", "error");
-    }
-  }
-
-  // ---------------------------------------------------------
-  // Mark Item as Claimed (FIXED VERSION)
-  // ---------------------------------------------------------
-  async function markAsClaimed(id: string) {
-    const user = (await supabase.auth.getUser()).data.user;
-
-    // Get claim and join profile full name
-    const { data: claim, error: claimError } = await supabase
-      .from("claims")
-      .select("claimed_by, profiles(full_name)")
-      .eq("item_id", id)
-      .single();
-
-    if (claimError || !claim) {
-      showToast("No claim found for this item!", "error");
-      return;
-    }
-
-    const claimerId = claim.claimed_by;
-    const claimerName = claim.profiles?.[0]?.full_name || "Unknown";
-
-    const { error } = await supabase
-      .from("items")
-      .update({
-        status: "Claimed",
-        claimed_by: claimerId,
-        claimed_at: new Date().toISOString(),
-        pickup_by: claimerName,
-      })
-      .eq("id", id);
-
-    if (!error) {
-      await supabase.from("logs").insert({
-        action: "item_claimed",
-        item_id: id,
-        performed_by: user?.id,
-      });
-
-      showToast("Item marked as claimed!", "success");
-      fetchItems();
     } else {
-      showToast("Failed to update!", "error");
+      showToast("Storage updated!", "success");
+      fetchItems();
     }
+
+    setShowModal(false);
   }
 
-  // ---------------------------------------------------------
-  // Delete Item
-  // ---------------------------------------------------------
+  // ----------------------------------------
+  // DELETE
+  // ----------------------------------------
   async function deleteItem(id: string) {
     if (!confirm("Delete this item?")) return;
 
-    const user = (await supabase.auth.getUser()).data.user;
-
     const { error } = await supabase.from("items").delete().eq("id", id);
 
-    if (!error) {
-      await supabase.from("logs").insert({
-        action: "item_deleted",
-        item_id: id,
-        performed_by: user?.id,
-      });
-
-      showToast("Item deleted!", "success");
+    if (error) showToast("Delete failed!", "error");
+    else {
+      showToast("Deleted!", "success");
       fetchItems();
-    } else {
-      showToast("Delete failed!", "error");
     }
   }
 
-  // ---------------------------------------------------------
-  // CSV Export (updated)
-  // ---------------------------------------------------------
+  // ----------------------------------------
+  // CSV EXPORT
+  // ----------------------------------------
   function downloadCSV() {
     const headers = [
       "ID",
@@ -230,10 +216,10 @@ export default function StoragePage() {
       [
         i.id,
         `"${i.name}"`,
-        `"${i.reporter_name || "N/A"}"`,
-        `"${i.pickup_by || "N/A"}"`,
-        i.category || "",
-        i.campus || "",
+        `"${i.dropper?.full_name || "N/A"}"`,
+        `"${i.picker?.full_name || "N/A"}"`,
+        i.category_name || "",
+        i.campus_name || "",
         i.location || "N/A",
         i.status,
         i.reported_at || "",
@@ -242,22 +228,21 @@ export default function StoragePage() {
     );
 
     const csv = [headers, ...rows].join("\n");
-
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
-
     const a = document.createElement("a");
+
     a.href = url;
     a.download = "storage_report.csv";
     a.click();
-
     URL.revokeObjectURL(url);
   }
 
+  // ----------------------------------------
   const storageLocations = Array.from(
     new Set(items.map((i) => i.location || "N/A"))
   );
-  const campuses = Array.from(new Set(items.map((i) => i.campus)));
+  const campuses = Array.from(new Set(items.map((i) => i.campus_name)));
 
   const showToast = (msg: string, type: string) => {
     setToast({ msg, type });
@@ -270,14 +255,13 @@ export default function StoragePage() {
     page * PER_PAGE
   );
 
-  // ---------------------------------------------------------
-  // Render Page
-  // ---------------------------------------------------------
+  // ----------------------------------------
+  // UI
+  // ----------------------------------------
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <h1 className="text-3xl font-bold text-ubGold mb-6">📦 Storage Inventory</h1>
 
-      {/* CSV Button */}
       <button
         onClick={downloadCSV}
         className="mb-6 px-4 py-2 bg-ubGold text-black font-semibold rounded shadow hover:bg-yellow-400"
@@ -285,22 +269,21 @@ export default function StoragePage() {
         ⬇ Download Storage CSV
       </button>
 
-      {/* Item Grid */}
       {loading ? (
         <p className="text-gray-300 text-center py-10">Loading...</p>
       ) : filteredItems.length === 0 ? (
-        <p className="text-gray-400 text-center">No items found.</p>
+        <p className="text-gray-400 text-center">No storage items found.</p>
       ) : (
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
           {paginatedItems.map((item) => (
             <div
               key={item.id}
-              className="p-4 bg-white dark:bg-gray-900 shadow rounded cursor-pointer hover:border-ubGold border"
               onClick={() => {
                 setSelectedItem(item);
                 setNewStorage(item.location || "");
                 setShowModal(true);
               }}
+              className="p-4 bg-white dark:bg-gray-900 shadow rounded cursor-pointer hover:border-ubGold border"
             >
               {item.image && (
                 <img
@@ -309,17 +292,27 @@ export default function StoragePage() {
                 />
               )}
 
-              <h2 className="font-bold text-lg text-ubBlue dark:text-ubGold">{item.name}</h2>
+              <h2 className="font-bold text-lg text-ubBlue dark:text-ubGold">
+                {item.name}
+              </h2>
 
-              <p className="text-sm text-gray-400">{item.category}</p>
+              <p className="text-sm text-gray-400">{item.category_name}</p>
 
-              <p className="text-sm text-gray-300">Drop-Off: {item.dropoff_location || "N/A"}</p>
+              <p className="text-sm text-gray-300">
+                Campus: {item.campus_name || "N/A"}
+              </p>
 
-              {item.pickup_by && (
-                <p className="text-sm text-gray-300">Pickup By: {item.pickup_by}</p>
-              )}
+              <p className="text-sm text-gray-300">
+                Dropoff By: {item.dropper?.full_name || "N/A"}
+              </p>
 
-              <p className="text-sm text-gray-300">Storage: {item.location || "N/A"}</p>
+              <p className="text-sm text-gray-300">
+                Pickup By: {item.picker?.full_name || "N/A"}
+              </p>
+
+              <p className="text-sm text-gray-300">
+                Storage: {item.location || "N/A"}
+              </p>
 
               <span
                 className={`inline-block mt-2 px-2 py-1 text-xs rounded ${
@@ -335,7 +328,7 @@ export default function StoragePage() {
         </div>
       )}
 
-      {/* Pagination */}
+      {/* PAGINATION */}
       {totalPages > 1 && (
         <div className="flex justify-center gap-2 mt-6">
           {Array.from({ length: totalPages }, (_, i) => (
@@ -354,21 +347,25 @@ export default function StoragePage() {
         </div>
       )}
 
-      {/* Modal */}
+      {/* MODAL */}
       {showModal && selectedItem && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4">
           <div className="bg-white dark:bg-gray-900 p-6 rounded-lg max-w-lg w-full relative border border-gray-700">
+
             <button
-              className="absolute right-4 top-3 text-gray-400 hover:text-white"
               onClick={() => setShowModal(false)}
+              className="absolute top-3 right-4 text-gray-400 hover:text-white"
             >
               ✕
             </button>
 
-            <h2 className="text-2xl font-bold text-ubBlue dark:text-ubGold">{selectedItem.name}</h2>
+            <h2 className="text-2xl font-bold text-ubBlue dark:text-ubGold">
+              {selectedItem.name}
+            </h2>
 
             <p className="text-gray-300 mb-2">
-              Category: {selectedItem.category} | Campus: {selectedItem.campus}
+              Category: {selectedItem.category_name} | Campus:{" "}
+              {selectedItem.campus_name}
             </p>
 
             <p className="text-gray-300 mb-1">Drop-Off Location:</p>
@@ -378,16 +375,13 @@ export default function StoragePage() {
               className="w-full px-3 py-2 border rounded bg-gray-800 text-gray-200"
             />
 
-            {selectedItem.pickup_by && (
-              <>
-                <p className="mt-3 mb-1 text-gray-300">Pickup By:</p>
-                <input
-                  disabled
-                  value={selectedItem.pickup_by}
-                  className="w-full px-3 py-2 border rounded bg-gray-800 text-gray-200"
-                />
-              </>
-            )}
+            <p className="mt-3 mb-1 text-gray-300">
+              Drop-Off By: {selectedItem.dropper?.full_name || "N/A"}
+            </p>
+
+            <p className="mt-3 mb-1 text-gray-300">
+              Pickup By: {selectedItem.picker?.full_name || "N/A"}
+            </p>
 
             <p className="mt-4 mb-1 text-gray-300">Current Storage:</p>
             <input
@@ -398,16 +392,16 @@ export default function StoragePage() {
 
             <p className="mt-4 mb-1 text-gray-300">New Storage Location:</p>
             <select
-              className="w-full px-3 py-2 border rounded bg-gray-800 text-gray-200"
               value={newStorage}
               onChange={(e) => setNewStorage(e.target.value)}
+              className="w-full px-3 py-2 border rounded bg-gray-800 text-gray-200"
             >
               {storageLocations.map((loc) => (
                 <option key={loc}>{loc}</option>
               ))}
             </select>
 
-            <div className="flex gap-3 justify-end mt-6">
+            <div className="flex justify-end gap-3 mt-6">
               <button
                 onClick={updateStorage}
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded"
@@ -433,6 +427,7 @@ export default function StoragePage() {
         </div>
       )}
 
+      {/* TOAST */}
       {toast && (
         <div
           className={`fixed top-4 right-4 px-4 py-2 rounded shadow ${
