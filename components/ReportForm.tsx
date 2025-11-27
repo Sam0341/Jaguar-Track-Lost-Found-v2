@@ -65,7 +65,7 @@ export default function ReportForm() {
       return;
     }
 
-    // ⭐ Update the profile with latest name + email
+    // ⭐ Update user profile with latest name & email
     await supabase
       .from("profiles")
       .update({
@@ -74,7 +74,7 @@ export default function ReportForm() {
       })
       .eq("id", auth.user.id);
 
-    // ⭐ Submit item
+    // ⭐ Step 1 — Insert Item
     const success = await addItem({
       name: itemName,
       description,
@@ -82,27 +82,58 @@ export default function ReportForm() {
       status,
       category: categoryId,
       campus: campusId,
-      dropoffLocation, // NEW
+      dropoffLocation,
       userId: auth.user.id,
       reporterName,
       reporterEmail,
       imageFile: image,
-      
     });
 
-    if (success) {
-      setMessage("✅ Report submitted successfully!");
-      setItemName("");
-      setDescription("");
-      setLocation("");
-      setCategoryId("");
-      setCampusId("");
-      setDropoffLocation("");
-      setStatus("Lost");
-      setImage(null);
-    } else {
+    if (!success) {
       setMessage("❌ Failed to submit report. Try again.");
+      setLoading(false);
+      return;
     }
+
+    // ⭐ Step 2 — Fetch the latest item for this user
+    const { data: itemRow } = await supabase
+      .from("items")
+      .select("id")
+      .eq("user_id", auth.user.id)
+      .order("reported_at", { ascending: false })
+      .limit(1)
+      .single();
+
+    if (!itemRow) {
+      setMessage("⚠️ Failed to create report entry.");
+      setLoading(false);
+      return;
+    }
+
+    // ⭐ Step 3 — Create a report record for admin dashboard
+    const expiration = new Date(Date.now() + 90 * 86400000) // 90 days
+      .toISOString()
+      .split("T")[0];
+
+    await supabase.from("reports").insert({
+      item_id: itemRow.id,
+      report_type: status,               // Lost or Found
+      storage_location: dropoffLocation || null,
+      expiration_date: expiration,
+      handled_by: null,
+      reported_by: auth.user.id,
+    });
+
+    // ⭐ Reset form
+    setMessage("✅ Report submitted successfully!");
+    setItemName("");
+    setDescription("");
+    setLocation("");
+    setCategoryId("");
+    setCampusId("");
+    setDropoffLocation("");
+    setStatus("Lost");
+    setImage(null);
 
     setLoading(false);
   };
@@ -175,7 +206,7 @@ export default function ReportForm() {
           required
         />
 
-        {/* ⭐ DROPOFF LOCATION (FOR FOUND ITEMS ONLY) */}
+        {/* ⭐ Drop-Off ONLY when Found */}
         {status === "Found" && (
           <select
             className="input rounded-2xl col-span-1 md:col-span-2"
@@ -218,13 +249,8 @@ export default function ReportForm() {
           rounded-2xl p-6 flex flex-col items-center justify-center text-gray-600 dark:text-gray-300 
           cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 transition"
         >
-          <span className="text-sm">Drag & drop an image here or click to upload</span>
-
-          {image && (
-            <span className="mt-2 text-xs opacity-70">
-              Selected: <strong>{image.name}</strong>
-            </span>
-          )}
+          <span className="text-sm">Upload an image</span>
+          {image && <span className="mt-2 text-xs opacity-70">Selected: <strong>{image.name}</strong></span>}
         </label>
 
         <div className="col-span-1 md:col-span-2 mt-4">
@@ -238,7 +264,6 @@ export default function ReportForm() {
             {loading ? "Submitting..." : "Submit Report"}
           </button>
         </div>
-
       </div>
 
       {message && (
