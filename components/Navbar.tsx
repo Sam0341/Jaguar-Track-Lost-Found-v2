@@ -345,7 +345,7 @@ export default function Navbar() {
 
                     {/* ⭐ NEW: CREATE USER */}
                     <NavLink
-                      href="/admin/create-user"
+                      href=""
                       onClick={() => setMenuOpen(false)}
                     >
                       Create User
