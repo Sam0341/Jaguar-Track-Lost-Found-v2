@@ -84,88 +84,88 @@ export default function AdminClaimsPage() {
   const [previewImage, setPreviewImage] = useState<string | null>(null);
 
   /* ========================= FETCH ALL CLAIMS ========================= */
-  const fetchClaims = async () => {
-    setErrorMsg(null);
+  /* ========================= FETCH ALL CLAIMS ========================= */
+const fetchClaims = async () => {
+  setErrorMsg(null);
 
-    try {
-      const { data: claimRows, error: claimErr } = await supabase
-        .from("claims")
+  try {
+    const { data: claimRows, error: claimErr } = await supabase
+      .from("claims")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (claimErr) throw claimErr;
+
+    const final: ClaimView[] = [];
+
+    for (const row of claimRows as ClaimRow[]) {
+      // 1. Load item
+      const { data: item } = await supabase
+        .from("items")
         .select("*")
-        .order("created_at", { ascending: false });
+        .eq("id", row.item_id)
+        .single();
 
-      if (claimErr) throw claimErr;
+      // 2. Load the USER WHO MADE THE CLAIM (real user)
+      const { data: user } = await supabase
+        .from("profiles")
+        .select("id, full_name, email")
+        .eq("id", row.claimed_by)   // ← correct: claim owner
+        .single();
 
-      const final: ClaimView[] = [];
+      // 3. Load campus
+      const { data: campus } =
+        item?.campus_id
+          ? await supabase
+              .from("campuses")
+              .select("name")
+              .eq("id", item.campus_id)
+              .single()
+          : { data: null };
 
-      for (const row of claimRows as ClaimRow[]) {
-        const { data: item } = await supabase
-          .from("items")
-          .select("*")
-          .eq("id", row.item_id)
-          .single();
+      // 4. Load category
+      const { data: category } =
+        item?.category_id
+          ? await supabase
+              .from("categories")
+              .select("name")
+              .eq("id", item.category_id)
+              .single()
+          : { data: null };
 
-        const { data: user } = await supabase
-          .from("profiles")
-          .select("id, full_name, email")
-          .eq("id", row.claimed_by)
-          .single();
-
-        const { data: campus } =
-          item?.campus_id
-            ? await supabase
-                .from("campuses")
-                .select("name")
-                .eq("id", item.campus_id)
-                .single()
-            : { data: null };
-
-        const { data: category } =
-          item?.category_id
-            ? await supabase
-                .from("categories")
-                .select("name")
-                .eq("id", item.category_id)
-                .single()
-            : { data: null };
-
-        let imageUrl: string | null = null;
-        if (item?.image) {
-          const { data: url } = supabase.storage
-            .from("item-photos")
-            .getPublicUrl(item.image);
-          imageUrl = url?.publicUrl || null;
-        }
-
-        final.push({
-          id: row.id,
-          message: row.message,
-          status: row.status,
-          created_at: row.created_at,
-          item:
-            item && {
-              ...item,
-              image: imageUrl,
-            },
-          user,
-          campus: campus?.name || null,
-          category: category?.name || null,
-        });
+      // 5. Image fix
+      let imageUrl: string | null = null;
+      if (item?.image) {
+        const { data: url } = supabase.storage
+          .from("item-photos")
+          .getPublicUrl(item.image);
+        imageUrl = url?.publicUrl || null;
       }
 
-      setClaims(final);
-    } catch (err: any) {
-      console.error("Fetch claims error:", err);
-      setErrorMsg(err.message || "Failed to fetch claims");
-    } finally {
-      setLoading(false);
+      final.push({
+        id: row.id,
+        message: row.message,
+        status: row.status,
+        created_at: row.created_at,
+        item:
+          item && {
+            ...item,
+            image: imageUrl,
+          },
+        user, // ← correct user is always the claimant
+        campus: campus?.name || null,
+        category: category?.name || null,
+      });
     }
-  };
 
-  useEffect(() => {
-    setLoading(true);
-    fetchClaims();
-  }, []);
-
+    setClaims(final);
+  } catch (err: any) {
+    console.error("Fetch claims error:", err);
+    setErrorMsg(err.message || "Failed to fetch claims");
+  } finally {
+    setLoading(false);
+  }
+};
   /* ========================= REALTIME CLAIM UPDATES ========================= */
   useEffect(() => {
   const channel = supabase
