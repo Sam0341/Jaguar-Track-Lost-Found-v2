@@ -86,6 +86,7 @@ export default function AdminClaimsPage() {
   /* ========================= FETCH ALL CLAIMS ========================= */
   /* ========================= FETCH ALL CLAIMS ========================= */
 /* ========================= FETCH ALL CLAIMS ========================= */
+/* ========================= FETCH ALL CLAIMS ========================= */
 const fetchClaims = async () => {
   setErrorMsg(null);
 
@@ -100,26 +101,21 @@ const fetchClaims = async () => {
     const final: ClaimView[] = [];
 
     for (const row of claimRows as ClaimRow[]) {
-      
-      /* ----------- Fetch Item ----------- */
+      // 1. Get the item
       const { data: item } = await supabase
         .from("items")
         .select("*")
         .eq("id", row.item_id)
-        .single();
+        .maybeSingle();
 
-      /* ----------- Fetch User (CLAIMER, not reporter) ----------- */
-      let user: ProfileData | null = null;
-      if (row.claimed_by) {
-        const { data: userData } = await supabase
-          .from("profiles")
-          .select("id, full_name, email")
-          .eq("id", row.claimed_by)
-          .maybeSingle(); // ⭐ prevents crash
-        user = userData;
-      }
+      // 2. Get the CLAIMING USER (not reporter!)
+      const { data: claimer } = await supabase
+        .from("profiles")
+        .select("id, full_name, email")
+        .eq("id", row.claimed_by)
+        .maybeSingle(); // ⭐ prevents crash when null
 
-      /* ----------- Fetch Campus ----------- */
+      // 3. Campus
       const { data: campus } =
         item?.campus_id
           ? await supabase
@@ -129,7 +125,7 @@ const fetchClaims = async () => {
               .maybeSingle()
           : { data: null };
 
-      /* ----------- Fetch Category ----------- */
+      // 4. Category
       const { data: category } =
         item?.category_id
           ? await supabase
@@ -139,7 +135,7 @@ const fetchClaims = async () => {
               .maybeSingle()
           : { data: null };
 
-      /* ----------- Build Image URL ----------- */
+      // 5. Image
       let imageUrl: string | null = null;
       if (item?.image) {
         const { data: url } = supabase.storage
@@ -148,7 +144,7 @@ const fetchClaims = async () => {
         imageUrl = url?.publicUrl || null;
       }
 
-      /* ----------- PUSH CLEAN DATA ----------- */
+      // 6. Push formatted result
       final.push({
         id: row.id,
         message: row.message,
@@ -159,7 +155,7 @@ const fetchClaims = async () => {
             ...item,
             image: imageUrl,
           },
-        user, // ⭐ correct claimer
+        user: claimer || null, // ⭐ correct user (the claimer)
         campus: campus?.name || null,
         category: category?.name || null,
       });
@@ -173,6 +169,7 @@ const fetchClaims = async () => {
     setLoading(false);
   }
 };
+
 
   /* ========================= REALTIME CLAIM UPDATES ========================= */
   useEffect(() => {
