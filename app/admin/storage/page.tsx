@@ -143,47 +143,49 @@ export default function StoragePage() {
   // ---------------------------------------------------------
   // Mark Item as Claimed (FIXED VERSION)
   // ---------------------------------------------------------
-  async function markAsClaimed(id: string) {
-    const user = (await supabase.auth.getUser()).data.user;
+  // ---------------------------------------------------------
+// Mark Item as Claimed (FINAL VERSION)
+// ---------------------------------------------------------
+async function markAsClaimed(id: string) {
+  const user = (await supabase.auth.getUser()).data.user;
 
-    // Get claim and join profile full name
-    const { data: claim, error: claimError } = await supabase
-      .from("claims")
-      .select("claimed_by, profiles(full_name)")
-      .eq("item_id", id)
-      .single();
+  // Get claim with claimer info
+  const { data: claim, error: claimError } = await supabase
+    .from("claims")
+    .select("claimed_by")
+    .eq("item_id", id)
+    .single();
 
-    if (claimError || !claim) {
-      showToast("No claim found for this item!", "error");
-      return;
-    }
-
-    const claimerId = claim.claimed_by;
-    const claimerName = claim.profiles?.[0]?.full_name || "Unknown";
-
-    const { error } = await supabase
-      .from("items")
-      .update({
-        status: "Claimed",
-        claimed_by: claimerId,
-        claimed_at: new Date().toISOString(),
-        pickup_by: claimerName,
-      })
-      .eq("id", id);
-
-    if (!error) {
-      await supabase.from("logs").insert({
-        action: "item_claimed",
-        item_id: id,
-        performed_by: user?.id,
-      });
-
-      showToast("Item marked as claimed!", "success");
-      fetchItems();
-    } else {
-      showToast("Failed to update!", "error");
-    }
+  if (claimError || !claim) {
+    showToast("No claim found for this item!", "error");
+    return;
   }
+
+  const claimerId = claim.claimed_by;
+
+  const { error } = await supabase
+    .from("items")
+    .update({
+      status: "Claimed",
+      claimed_by: claimerId,      // uuid of claimer
+      pickup_by: claimerId,       // SAME user (uuid)
+      claimed_at: new Date().toISOString(),
+    })
+    .eq("id", id);
+
+  if (!error) {
+    await supabase.from("logs").insert({
+      action: "item_claimed",
+      item_id: id,
+      performed_by: user?.id,
+    });
+
+    showToast("Item marked as claimed!", "success");
+    fetchItems();
+  } else {
+    showToast("Failed to update!", "error");
+  }
+}
 
   // ---------------------------------------------------------
   // Delete Item
