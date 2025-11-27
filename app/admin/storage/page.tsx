@@ -15,6 +15,10 @@ type Item = {
   reported_at?: string;
   reporter_name?: string;
   dropoff_location?: string;
+
+  // NEW FIELDS
+  claimed_at?: string;
+  pickup_by?: string;
 };
 
 export default function StoragePage() {
@@ -41,6 +45,9 @@ export default function StoragePage() {
     totalStorageItems: 0,
   });
 
+  // ---------------------------------------------------------
+  // Fetch items
+  // ---------------------------------------------------------
   useEffect(() => {
     fetchItems();
   }, []);
@@ -54,8 +61,9 @@ export default function StoragePage() {
       .order("reported_at", { ascending: false });
 
     if (!error && data) {
-      // ⭐ ONLY SHOW FOUND ITEMS IN STORAGE
-      const foundItems = data.filter((i) => i.status === "Found");
+      const foundItems = data.filter(
+        (i) => i.status === "Found" || i.status === "Claimed"
+      );
 
       setItems(foundItems);
       setFilteredItems(foundItems);
@@ -65,17 +73,20 @@ export default function StoragePage() {
     setLoading(false);
   }
 
+  // ---------------------------------------------------------
+  // Stats
+  // ---------------------------------------------------------
   function calculateStats(data: Item[]) {
     const storages = new Set(data.map((i) => i.location || "N/A"));
-    const total = data.length;
-
     setStats({
       storages: storages.size,
-      totalStorageItems: total,
+      totalStorageItems: data.length,
     });
   }
 
+  // ---------------------------------------------------------
   // Filters
+  // ---------------------------------------------------------
   useEffect(() => {
     let data = [...items];
 
@@ -88,19 +99,22 @@ export default function StoragePage() {
     if (storageFilter !== "All")
       data = data.filter((i) => (i.location || "N/A") === storageFilter);
 
-    if (searchTerm.trim() !== "") {
-      const term = searchTerm.toLowerCase();
+    if (searchTerm.trim()) {
+      const t = searchTerm.toLowerCase();
       data = data.filter(
         (i) =>
-          i.name.toLowerCase().includes(term) ||
-          (i.location || "").toLowerCase().includes(term) ||
-          (i.campus || "").toLowerCase().includes(term)
+          i.name.toLowerCase().includes(t) ||
+          (i.location || "").toLowerCase().includes(t) ||
+          (i.campus || "").toLowerCase().includes(t)
       );
     }
 
     setFilteredItems(data);
   }, [searchTerm, campusFilter, statusFilter, storageFilter, items]);
 
+  // ---------------------------------------------------------
+  // Update Storage Location
+  // ---------------------------------------------------------
   async function updateStorage() {
     if (!selectedItem) return;
 
@@ -115,7 +129,7 @@ export default function StoragePage() {
       await supabase.from("logs").insert({
         action: "storage_updated",
         item_id: selectedItem.id,
-        performed_by: user?.id || null,
+        performed_by: user?.id,
       });
 
       showToast("Storage updated!", "success");
@@ -126,12 +140,35 @@ export default function StoragePage() {
     }
   }
 
+  // ---------------------------------------------------------
+  // Mark Item as Claimed (FIXED VERSION)
+  // ---------------------------------------------------------
   async function markAsClaimed(id: string) {
     const user = (await supabase.auth.getUser()).data.user;
 
+    // Get claim and join profile full name
+    const { data: claim, error: claimError } = await supabase
+      .from("claims")
+      .select("claimed_by, profiles(full_name)")
+      .eq("item_id", id)
+      .single();
+
+    if (claimError || !claim) {
+      showToast("No claim found for this item!", "error");
+      return;
+    }
+
+    const claimerId = claim.claimed_by;
+    const claimerName = claim.profiles?.[0]?.full_name || "Unknown";
+
     const { error } = await supabase
       .from("items")
-      .update({ status: "Claimed" })
+      .update({
+        status: "Claimed",
+        claimed_by: claimerId,
+        claimed_at: new Date().toISOString(),
+        pickup_by: claimerName,
+      })
       .eq("id", id);
 
     if (!error) {
@@ -144,10 +181,13 @@ export default function StoragePage() {
       showToast("Item marked as claimed!", "success");
       fetchItems();
     } else {
-      showToast("Update failed!", "error");
+      showToast("Failed to update!", "error");
     }
   }
 
+  // ---------------------------------------------------------
+  // Delete Item
+  // ---------------------------------------------------------
   async function deleteItem(id: string) {
     if (!confirm("Delete this item?")) return;
 
@@ -169,10 +209,54 @@ export default function StoragePage() {
     }
   }
 
+  // ---------------------------------------------------------
+  // CSV Export (updated)
+  // ---------------------------------------------------------
+  function downloadCSV() {
+    const headers = [
+      "ID",
+      "Name",
+      "Dropoff_By",
+      "Pickup_By",
+      "Category",
+      "Campus",
+      "Storage",
+      "Status",
+      "Reported_At",
+      "Claimed_At",
+    ].join(",");
+
+    const rows = items.map((i) =>
+      [
+        i.id,
+        `"${i.name}"`,
+        `"${i.reporter_name || "N/A"}"`,
+        `"${i.pickup_by || "N/A"}"`,
+        i.category || "",
+        i.campus || "",
+        i.location || "N/A",
+        i.status,
+        i.reported_at || "",
+        i.claimed_at || "",
+      ].join(",")
+    );
+
+    const csv = [headers, ...rows].join("\n");
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "storage_report.csv";
+    a.click();
+
+    URL.revokeObjectURL(url);
+  }
+
   const storageLocations = Array.from(
     new Set(items.map((i) => i.location || "N/A"))
   );
-
   const campuses = Array.from(new Set(items.map((i) => i.campus)));
 
   const showToast = (msg: string, type: string) => {
@@ -181,138 +265,37 @@ export default function StoragePage() {
   };
 
   const totalPages = Math.ceil(filteredItems.length / PER_PAGE);
-
   const paginatedItems = filteredItems.slice(
     (page - 1) * PER_PAGE,
     page * PER_PAGE
   );
 
-  function downloadCSV() {
-    const headers = ["ID,Name,Category,Campus,Storage,Status,Reported_At"];
-    const rows = items.map(
-      (item) =>
-        `${item.id},"${item.name}",${item.category || ""},${
-          item.campus || ""
-        },${item.location || "N/A"},${item.status},${item.reported_at || ""}`
-    );
-    const csvContent = [...headers, ...rows].join("\n");
-
-    const blob = new Blob([csvContent], {
-      type: "text/csv;charset=utf-8;",
-    });
-
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "storage_report.csv";
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
+  // ---------------------------------------------------------
+  // Render Page
+  // ---------------------------------------------------------
   return (
     <div className="p-6 max-w-7xl mx-auto">
-      <h1 className="text-3xl font-bold text-ubGold mb-6">
-        📦 Storage Inventory
-      </h1>
+      <h1 className="text-3xl font-bold text-ubGold mb-6">📦 Storage Inventory</h1>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-        <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-lg p-4 text-center shadow">
-          <p className="text-2xl font-bold text-ubBlue dark:text-ubGold">
-            {stats.totalStorageItems}
-          </p>
-          <p className="text-gray-600 dark:text-gray-400 text-sm">
-            Total Items in Storage
-          </p>
-        </div>
-
-        <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-lg p-4 text-center shadow">
-          <p className="text-2xl font-bold text-ubBlue dark:text-ubGold">
-            {stats.storages}
-          </p>
-          <p className="text-gray-600 dark:text-gray-400 text-sm">
-            Storage Rooms
-          </p>
-        </div>
-      </div>
-
-      {/* CSV */}
+      {/* CSV Button */}
       <button
         onClick={downloadCSV}
         className="mb-6 px-4 py-2 bg-ubGold text-black font-semibold rounded shadow hover:bg-yellow-400"
       >
-        ⬇ Download Storage Report (CSV)
+        ⬇ Download Storage CSV
       </button>
 
-      {/* Toast */}
-      {toast && (
-        <div
-          className={`fixed top-5 right-5 px-4 py-2 rounded shadow-lg text-white ${
-            toast.type === "success" ? "bg-green-600" : "bg-red-600"
-          }`}
-        >
-          {toast.msg}
-        </div>
-      )}
-
-      {/* Filters */}
-      <div className="grid sm:grid-cols-4 gap-4 mb-6">
-        <input
-          type="text"
-          placeholder="Search items…"
-          className="px-3 py-2 bg-white dark:bg-gray-800 border border-gray-400 dark:border-gray-700 rounded-lg text-black dark:text-white"
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-        />
-
-        <select
-          className="px-3 py-2 bg-white dark:bg-gray-800 border border-gray-400 dark:border-gray-700 rounded-lg text-black dark:text-white"
-          value={campusFilter}
-          onChange={(e) => setCampusFilter(e.target.value)}
-        >
-          <option>All</option>
-          {campuses.map((camp) => (
-            <option key={camp}>{camp}</option>
-          ))}
-        </select>
-
-        <select
-          className="px-3 py-2 bg-white dark:bg-gray-800 border border-gray-400 dark:border-gray-700 rounded-lg text-black dark:text-white"
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-        >
-          <option>All</option>
-          <option>Found</option>
-          <option>Claimed</option>
-        </select>
-
-        <select
-          className="px-3 py-2 bg-white dark:bg-gray-800 border border-gray-400 dark:border-gray-700 rounded-lg text-black dark:text-white"
-          value={storageFilter}
-          onChange={(e) => setStorageFilter(e.target.value)}
-        >
-          <option>All</option>
-          {storageLocations.map((loc) => (
-            <option key={loc}>{loc}</option>
-          ))}
-        </select>
-      </div>
-
-      {/* Items Grid */}
+      {/* Item Grid */}
       {loading ? (
-        <p className="text-gray-500 dark:text-gray-300 text-center py-20">
-          Loading storage…
-        </p>
+        <p className="text-gray-300 text-center py-10">Loading...</p>
       ) : filteredItems.length === 0 ? (
-        <p className="text-gray-600 dark:text-gray-400 text-center">
-          No storage items.
-        </p>
+        <p className="text-gray-400 text-center">No items found.</p>
       ) : (
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
           {paginatedItems.map((item) => (
             <div
               key={item.id}
-              className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-lg p-4 shadow hover:border-ubGold cursor-pointer"
+              className="p-4 bg-white dark:bg-gray-900 shadow rounded cursor-pointer hover:border-ubGold border"
               onClick={() => {
                 setSelectedItem(item);
                 setNewStorage(item.location || "");
@@ -326,29 +309,20 @@ export default function StoragePage() {
                 />
               )}
 
-              <h2 className="text-lg font-bold text-ubBlue dark:text-ubGold">
-                {item.name}
-              </h2>
-              <p className="text-gray-600 dark:text-gray-400 text-sm">
-                {item.category}
-              </p>
+              <h2 className="font-bold text-lg text-ubBlue dark:text-ubGold">{item.name}</h2>
 
-              <p className="text-gray-500 dark:text-gray-400 text-sm">
-                Drop-Off:{" "}
-                <span className="text-gray-700 dark:text-gray-300">
-                  {item.dropoff_location || "N/A"}
-                </span>
-              </p>
+              <p className="text-sm text-gray-400">{item.category}</p>
 
-              <p className="text-gray-500 dark:text-gray-400 text-sm mt-1">
-                Stored At:{" "}
-                <span className="text-gray-700 dark:text-gray-300">
-                  {item.location || "N/A"}
-                </span>
-              </p>
+              <p className="text-sm text-gray-300">Drop-Off: {item.dropoff_location || "N/A"}</p>
+
+              {item.pickup_by && (
+                <p className="text-sm text-gray-300">Pickup By: {item.pickup_by}</p>
+              )}
+
+              <p className="text-sm text-gray-300">Storage: {item.location || "N/A"}</p>
 
               <span
-                className={`inline-block mt-2 px-2 py-1 rounded text-xs font-semibold ${
+                className={`inline-block mt-2 px-2 py-1 text-xs rounded ${
                   item.status === "Claimed"
                     ? "bg-green-600 text-white"
                     : "bg-blue-600 text-white"
@@ -363,16 +337,16 @@ export default function StoragePage() {
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex justify-center gap-2 mt-8">
+        <div className="flex justify-center gap-2 mt-6">
           {Array.from({ length: totalPages }, (_, i) => (
             <button
               key={i}
+              onClick={() => setPage(i + 1)}
               className={`px-3 py-1 rounded ${
                 page === i + 1
                   ? "bg-ubGold text-black"
-                  : "bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-700"
+                  : "bg-gray-800 text-gray-300"
               }`}
-              onClick={() => setPage(i + 1)}
             >
               {i + 1}
             </button>
@@ -382,59 +356,58 @@ export default function StoragePage() {
 
       {/* Modal */}
       {showModal && selectedItem && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center px-4 z-50">
-          <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-lg p-6 max-w-lg w-full relative">
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4">
+          <div className="bg-white dark:bg-gray-900 p-6 rounded-lg max-w-lg w-full relative border border-gray-700">
             <button
-              className="absolute top-3 right-3 text-gray-600 dark:text-gray-300 hover:text-black dark:hover:text-white"
+              className="absolute right-4 top-3 text-gray-400 hover:text-white"
               onClick={() => setShowModal(false)}
             >
               ✕
             </button>
 
-            <h2 className="text-2xl font-bold text-ubBlue dark:text-ubGold mb-1">
-              {selectedItem.name}
-            </h2>
+            <h2 className="text-2xl font-bold text-ubBlue dark:text-ubGold">{selectedItem.name}</h2>
 
-            <p className="text-gray-700 dark:text-gray-400 mb-4">
-              Category: {selectedItem.category || "Unknown"} • Campus:{" "}
-              {selectedItem.campus || "Unknown"}
+            <p className="text-gray-300 mb-2">
+              Category: {selectedItem.category} | Campus: {selectedItem.campus}
             </p>
 
-            <p className="text-gray-800 dark:text-gray-300 mb-1">
-              Drop-Off Location:
-            </p>
+            <p className="text-gray-300 mb-1">Drop-Off Location:</p>
             <input
-              className="w-full px-3 py-2 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded text-gray-900 dark:text-gray-300"
+              disabled
               value={selectedItem.dropoff_location || "N/A"}
-              disabled
+              className="w-full px-3 py-2 border rounded bg-gray-800 text-gray-200"
             />
 
-            <p className="mt-4 mb-1 text-gray-800 dark:text-gray-300">
-              Current Storage:
-            </p>
+            {selectedItem.pickup_by && (
+              <>
+                <p className="mt-3 mb-1 text-gray-300">Pickup By:</p>
+                <input
+                  disabled
+                  value={selectedItem.pickup_by}
+                  className="w-full px-3 py-2 border rounded bg-gray-800 text-gray-200"
+                />
+              </>
+            )}
+
+            <p className="mt-4 mb-1 text-gray-300">Current Storage:</p>
             <input
-              className="w-full px-3 py-2 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded text-gray-900 dark:text-gray-300"
-              value={selectedItem.location || "N/A"}
               disabled
+              value={selectedItem.location || "N/A"}
+              className="w-full px-3 py-2 border rounded bg-gray-800 text-gray-200"
             />
 
-            <p className="mt-4 mb-1 text-gray-800 dark:text-gray-300">
-              New Storage Location:
-            </p>
-
+            <p className="mt-4 mb-1 text-gray-300">New Storage Location:</p>
             <select
-              className="w-full px-3 py-2 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded text-gray-900 dark:text-gray-300"
+              className="w-full px-3 py-2 border rounded bg-gray-800 text-gray-200"
               value={newStorage}
               onChange={(e) => setNewStorage(e.target.value)}
             >
               {storageLocations.map((loc) => (
-                <option key={loc} value={loc}>
-                  {loc}
-                </option>
+                <option key={loc}>{loc}</option>
               ))}
             </select>
 
-            <div className="flex justify-end gap-3 mt-5">
+            <div className="flex gap-3 justify-end mt-6">
               <button
                 onClick={updateStorage}
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded"
@@ -446,7 +419,7 @@ export default function StoragePage() {
                 onClick={() => markAsClaimed(selectedItem.id)}
                 className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded"
               >
-                Mark as Claimed
+                Mark Claimed
               </button>
 
               <button
@@ -457,6 +430,16 @@ export default function StoragePage() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {toast && (
+        <div
+          className={`fixed top-4 right-4 px-4 py-2 rounded shadow ${
+            toast.type === "success" ? "bg-green-600" : "bg-red-600"
+          } text-white`}
+        >
+          {toast.msg}
         </div>
       )}
     </div>
