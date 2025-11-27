@@ -18,8 +18,8 @@ type Item = {
 
   dropoff_location?: string;
 
-  dropper?: { full_name: string | null } | null;  // dropoff_by → profiles join
-  picker?: { full_name: string | null } | null;   // pickup_by → profiles join
+  dropper?: { full_name: string | null } | null; // profiles!dropoff_by
+  picker?: { full_name: string | null } | null;  // profiles!pickup_by
 };
 
 export default function StoragePage() {
@@ -47,7 +47,7 @@ export default function StoragePage() {
   });
 
   // ---------------------------------------------------------
-  // Fetch items (JOIN dropoff_by and pickup_by to profiles)
+  // Fetch items with JOIN to profiles
   // ---------------------------------------------------------
   useEffect(() => {
     fetchItems();
@@ -66,13 +66,13 @@ export default function StoragePage() {
       .order("reported_at", { ascending: false });
 
     if (!error && data) {
-      const foundItems = data.filter(
+      const onlyStored = data.filter(
         (i) => i.status === "Found" || i.status === "Claimed"
       );
 
-      setItems(foundItems);
-      setFilteredItems(foundItems);
-      calculateStats(foundItems);
+      setItems(onlyStored);
+      setFilteredItems(onlyStored);
+      calculateStats(onlyStored);
     }
 
     setLoading(false);
@@ -140,18 +140,18 @@ export default function StoragePage() {
   }
 
   // ---------------------------------------------------------
-  // FINAL FIXED CLAIM LOGIC
+  // FIXED: Correct Claimed Logic
   // ---------------------------------------------------------
   async function markAsClaimed(id: string) {
     const user = (await supabase.auth.getUser()).data.user;
 
-    const { data: claim, error: claimError } = await supabase
+    const { data: claim, error: claimErr } = await supabase
       .from("claims")
       .select("claimed_by")
       .eq("item_id", id)
       .single();
 
-    if (claimError || !claim) {
+    if (claimErr || !claim) {
       showToast("No claim found for this item!", "error");
       return;
     }
@@ -163,7 +163,7 @@ export default function StoragePage() {
       .update({
         status: "Claimed",
         claimed_by: claimerId,
-        pickup_by: claimerId, // UUID of the claimer
+        pickup_by: claimerId,
         claimed_at: new Date().toISOString(),
       })
       .eq("id", id);
@@ -178,7 +178,7 @@ export default function StoragePage() {
       showToast("Item marked as claimed!", "success");
       fetchItems();
     } else {
-      showToast("Update failed!", "error");
+      showToast("Failed to update!", "error");
     }
   }
 
@@ -205,7 +205,7 @@ export default function StoragePage() {
   }
 
   // ---------------------------------------------------------
-  // CSV Export with FULL NAMES
+  // CSV Export
   // ---------------------------------------------------------
   function downloadCSV() {
     const headers = [
@@ -237,7 +237,6 @@ export default function StoragePage() {
     );
 
     const csv = [headers, ...rows].join("\n");
-
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
 
@@ -266,13 +265,14 @@ export default function StoragePage() {
   );
 
   // ---------------------------------------------------------
-  // Render
+  // RENDER PAGE
   // ---------------------------------------------------------
   return (
     <div className="p-6 max-w-7xl mx-auto">
-      <h1 className="text-3xl font-bold text-ubGold mb-6">📦 Storage Inventory</h1>
+      <h1 className="text-3xl font-bold text-ubGold mb-6">
+        📦 Storage Inventory
+      </h1>
 
-      {/* CSV Button */}
       <button
         onClick={downloadCSV}
         className="mb-6 px-4 py-2 bg-ubGold text-black font-semibold rounded shadow hover:bg-yellow-400"
@@ -280,7 +280,6 @@ export default function StoragePage() {
         ⬇ Download Storage CSV
       </button>
 
-      {/* Loading */}
       {loading ? (
         <p className="text-gray-300 text-center py-10">Loading...</p>
       ) : filteredItems.length === 0 ? (
@@ -355,7 +354,7 @@ export default function StoragePage() {
         </div>
       )}
 
-      {/* Modal */}
+      {/* MODAL */}
       {showModal && selectedItem && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4">
           <div className="bg-white dark:bg-gray-900 p-6 rounded-lg max-w-lg w-full relative border border-gray-700">
