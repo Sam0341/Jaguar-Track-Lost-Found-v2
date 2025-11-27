@@ -1,52 +1,83 @@
+# 🐾 Jaguar Track Lost & Found (UB) — Version 2  
+A modern Lost & Found system built for **University of Belize students** to help reconnect Jaguars with their belongings.  
+This platform provides a **verified, secure, and easy-to-use** workflow for reporting, browsing, and claiming lost items.
 
-# UB Lost & Found (Next.js + TS + Tailwind)
+---
 
-Demo front-end for the University of Belize Lost & Found Management System.
+## 🚀 Features
 
-## Quick Start
+### 🔐 **UB Account Verification**
+All users must log in using a verified UB email.  
+This keeps the platform safe and ensures all reports are legitimate.
 
-```bash
-# 1) Install deps
-npm install
+### 📦 **Report Lost or Found Items**
+Users can:
+- Submit a lost item report  
+- Submit a found item report  
+- Attach images  
+- Select campus, location, category  
+- Provide item descriptions  
 
-# 2) Run dev server
-npm run dev
-```
+### 🔍 **Browse All Reported Items**
+The dashboard allows users to:
+- Filter by campus  
+- Sort items  
+- Search by name, category, or description  
+- View item details  
 
-Open http://localhost:3000 in your browser.
+### 📬 **Claim System**
+Students can:
+- Claim an item  
+- Chat directly with the finder  
+- Send messages in real time  
+- Receive notifications when claims are updated  
 
-> This demo uses **localStorage** for data. You'll wire up a real backend later.
+### 🛡️ **Admin Dashboard**
+Admins can:
+- View ALL items & reports  
+- Edit or update item statuses  
+- View logs  
+- Manage storage rooms  
+- Verify reports  
+- Delete inappropriate submissions  
 
-## What’s Included
+### 💬 **Real-Time Chat**
+Built-in messaging system for:
+- Claim confirmation  
+- Pickup arrangements  
+- Admin communication  
 
-- Next.js 14 (App Router) + TypeScript
-- Tailwind CSS (with UB colors)
-- Pages:
-  - `/` Home
-  - `/items` Browse + filter
-  - `/items/[id]` Item details
-  - `/report/lost` Report a lost item
-  - `/report/found` Report a found item
-  - `/reports` Simple analytics (recovery rate, common categories)
-- Components: Navbar, Footer, ItemCard, ReportForm
-- `lib/store.ts` — simple client-side storage (swap for real API/DB)
+### 🌙 **Light / Dark Mode**
+Smooth theme toggle for better readability.
 
-## Where to Add a Real Database / API
+### 📁 **Storage Room Management**
+Admins can track:
+- Items in storage  
+- Expiration dates  
+- Pickup statuses  
 
-Replace `lib/store.ts` with calls to your API routes or server actions that
-talk to a database (e.g., PostgreSQL/Prisma, Supabase, Firebase, etc.).
+---
 
-Ideas:
-- Add authentication/roles (students, staff, admin).
-- Allow image uploads (S3/Cloudinary) instead of URLs.
-- Add moderation & claim/verify workflows.
-- Export CSV reports.
+## 🖥️ Tech Stack
 
-## UB Colors
+### **Frontend**
+- Next.js 14 (App Router)
+- React
+- Tailwind CSS
+- Framer Motion
+- Lucide Icons
 
-- `ubBlue`: `#003A70`
-- `ubGold`: `#FDB813`
+### **Backend**
+- Supabase (PostgreSQL)
+- Supabase Auth (Email login)
+- Supabase RLS Policies
+- Edge Functions (optional)
 
-## License
+### **Other**
+- TypeScript
+- Vercel Deployment
 
-MIT — use freely for demos and coursework.
+---
+
+## 📂 Project Structure (`/app`)
+
