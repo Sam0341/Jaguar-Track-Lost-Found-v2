@@ -10,15 +10,16 @@ type Item = {
   campus: string | null;
   location: string | null;
   status: string;
+
   description?: string;
   image?: string;
   reported_at?: string;
-  reporter_name?: string;
+  claimed_at?: string;
+
   dropoff_location?: string;
 
-  // NEW FIELDS
-  claimed_at?: string;
-  pickup_by?: string;
+  dropper?: { full_name: string | null } | null;  // dropoff_by → profiles join
+  picker?: { full_name: string | null } | null;   // pickup_by → profiles join
 };
 
 export default function StoragePage() {
@@ -46,7 +47,7 @@ export default function StoragePage() {
   });
 
   // ---------------------------------------------------------
-  // Fetch items
+  // Fetch items (JOIN dropoff_by and pickup_by to profiles)
   // ---------------------------------------------------------
   useEffect(() => {
     fetchItems();
@@ -57,7 +58,11 @@ export default function StoragePage() {
 
     const { data, error } = await supabase
       .from("items")
-      .select("*")
+      .select(`
+        *,
+        dropper:profiles!dropoff_by(full_name),
+        picker:profiles!pickup_by(full_name)
+      `)
       .order("reported_at", { ascending: false });
 
     if (!error && data) {
@@ -74,8 +79,6 @@ export default function StoragePage() {
   }
 
   // ---------------------------------------------------------
-  // Stats
-  // ---------------------------------------------------------
   function calculateStats(data: Item[]) {
     const storages = new Set(data.map((i) => i.location || "N/A"));
     setStats({
@@ -84,8 +87,6 @@ export default function StoragePage() {
     });
   }
 
-  // ---------------------------------------------------------
-  // Filters
   // ---------------------------------------------------------
   useEffect(() => {
     let data = [...items];
@@ -113,8 +114,6 @@ export default function StoragePage() {
   }, [searchTerm, campusFilter, statusFilter, storageFilter, items]);
 
   // ---------------------------------------------------------
-  // Update Storage Location
-  // ---------------------------------------------------------
   async function updateStorage() {
     if (!selectedItem) return;
 
@@ -141,54 +140,48 @@ export default function StoragePage() {
   }
 
   // ---------------------------------------------------------
-  // Mark Item as Claimed (FIXED VERSION)
+  // FINAL FIXED CLAIM LOGIC
   // ---------------------------------------------------------
-  // ---------------------------------------------------------
-// Mark Item as Claimed (FINAL VERSION)
-// ---------------------------------------------------------
-async function markAsClaimed(id: string) {
-  const user = (await supabase.auth.getUser()).data.user;
+  async function markAsClaimed(id: string) {
+    const user = (await supabase.auth.getUser()).data.user;
 
-  // Get claim with claimer info
-  const { data: claim, error: claimError } = await supabase
-    .from("claims")
-    .select("claimed_by")
-    .eq("item_id", id)
-    .single();
+    const { data: claim, error: claimError } = await supabase
+      .from("claims")
+      .select("claimed_by")
+      .eq("item_id", id)
+      .single();
 
-  if (claimError || !claim) {
-    showToast("No claim found for this item!", "error");
-    return;
+    if (claimError || !claim) {
+      showToast("No claim found for this item!", "error");
+      return;
+    }
+
+    const claimerId = claim.claimed_by;
+
+    const { error } = await supabase
+      .from("items")
+      .update({
+        status: "Claimed",
+        claimed_by: claimerId,
+        pickup_by: claimerId, // UUID of the claimer
+        claimed_at: new Date().toISOString(),
+      })
+      .eq("id", id);
+
+    if (!error) {
+      await supabase.from("logs").insert({
+        action: "item_claimed",
+        item_id: id,
+        performed_by: user?.id,
+      });
+
+      showToast("Item marked as claimed!", "success");
+      fetchItems();
+    } else {
+      showToast("Update failed!", "error");
+    }
   }
 
-  const claimerId = claim.claimed_by;
-
-  const { error } = await supabase
-    .from("items")
-    .update({
-      status: "Claimed",
-      claimed_by: claimerId,      // uuid of claimer
-      pickup_by: claimerId,       // SAME user (uuid)
-      claimed_at: new Date().toISOString(),
-    })
-    .eq("id", id);
-
-  if (!error) {
-    await supabase.from("logs").insert({
-      action: "item_claimed",
-      item_id: id,
-      performed_by: user?.id,
-    });
-
-    showToast("Item marked as claimed!", "success");
-    fetchItems();
-  } else {
-    showToast("Failed to update!", "error");
-  }
-}
-
-  // ---------------------------------------------------------
-  // Delete Item
   // ---------------------------------------------------------
   async function deleteItem(id: string) {
     if (!confirm("Delete this item?")) return;
@@ -212,7 +205,7 @@ async function markAsClaimed(id: string) {
   }
 
   // ---------------------------------------------------------
-  // CSV Export (updated)
+  // CSV Export with FULL NAMES
   // ---------------------------------------------------------
   function downloadCSV() {
     const headers = [
@@ -232,8 +225,8 @@ async function markAsClaimed(id: string) {
       [
         i.id,
         `"${i.name}"`,
-        `"${i.reporter_name || "N/A"}"`,
-        `"${i.pickup_by || "N/A"}"`,
+        `"${i.dropper?.full_name || "N/A"}"`,
+        `"${i.picker?.full_name || "N/A"}"`,
         i.category || "",
         i.campus || "",
         i.location || "N/A",
@@ -273,7 +266,7 @@ async function markAsClaimed(id: string) {
   );
 
   // ---------------------------------------------------------
-  // Render Page
+  // Render
   // ---------------------------------------------------------
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -287,11 +280,11 @@ async function markAsClaimed(id: string) {
         ⬇ Download Storage CSV
       </button>
 
-      {/* Item Grid */}
+      {/* Loading */}
       {loading ? (
         <p className="text-gray-300 text-center py-10">Loading...</p>
       ) : filteredItems.length === 0 ? (
-        <p className="text-gray-400 text-center">No items found.</p>
+        <p className="text-gray-400 text-center">No storage items found.</p>
       ) : (
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
           {paginatedItems.map((item) => (
@@ -311,17 +304,23 @@ async function markAsClaimed(id: string) {
                 />
               )}
 
-              <h2 className="font-bold text-lg text-ubBlue dark:text-ubGold">{item.name}</h2>
+              <h2 className="font-bold text-lg text-ubBlue dark:text-ubGold">
+                {item.name}
+              </h2>
 
               <p className="text-sm text-gray-400">{item.category}</p>
 
-              <p className="text-sm text-gray-300">Drop-Off: {item.dropoff_location || "N/A"}</p>
+              <p className="text-sm text-gray-300">
+                Dropoff By: {item.dropper?.full_name || "N/A"}
+              </p>
 
-              {item.pickup_by && (
-                <p className="text-sm text-gray-300">Pickup By: {item.pickup_by}</p>
-              )}
+              <p className="text-sm text-gray-300">
+                Pickup By: {item.picker?.full_name || "N/A"}
+              </p>
 
-              <p className="text-sm text-gray-300">Storage: {item.location || "N/A"}</p>
+              <p className="text-sm text-gray-300">
+                Storage: {item.location || "N/A"}
+              </p>
 
               <span
                 className={`inline-block mt-2 px-2 py-1 text-xs rounded ${
@@ -367,7 +366,9 @@ async function markAsClaimed(id: string) {
               ✕
             </button>
 
-            <h2 className="text-2xl font-bold text-ubBlue dark:text-ubGold">{selectedItem.name}</h2>
+            <h2 className="text-2xl font-bold text-ubBlue dark:text-ubGold">
+              {selectedItem.name}
+            </h2>
 
             <p className="text-gray-300 mb-2">
               Category: {selectedItem.category} | Campus: {selectedItem.campus}
@@ -380,16 +381,13 @@ async function markAsClaimed(id: string) {
               className="w-full px-3 py-2 border rounded bg-gray-800 text-gray-200"
             />
 
-            {selectedItem.pickup_by && (
-              <>
-                <p className="mt-3 mb-1 text-gray-300">Pickup By:</p>
-                <input
-                  disabled
-                  value={selectedItem.pickup_by}
-                  className="w-full px-3 py-2 border rounded bg-gray-800 text-gray-200"
-                />
-              </>
-            )}
+            <p className="mt-3 mb-1 text-gray-300">
+              Drop-Off By: {selectedItem.dropper?.full_name || "N/A"}
+            </p>
+
+            <p className="mt-3 mb-1 text-gray-300">
+              Pickup By: {selectedItem.picker?.full_name || "N/A"}
+            </p>
 
             <p className="mt-4 mb-1 text-gray-300">Current Storage:</p>
             <input
