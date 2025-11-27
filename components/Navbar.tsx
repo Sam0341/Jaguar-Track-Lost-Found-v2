@@ -342,14 +342,6 @@ export default function Navbar() {
                     >
                       Logs
                     </NavLink>
-
-                    {/* ⭐ NEW: CREATE USER */}
-                    <NavLink
-                      href=""
-                      onClick={() => setMenuOpen(false)}
-                    >
-                      Create User
-                    </NavLink>
                   </>
                 )}
 
