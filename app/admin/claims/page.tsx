@@ -91,7 +91,7 @@ const fetchClaims = async () => {
   try {
     const { data: claimRows, error: claimErr } = await supabase
       .from("claims")
-      .select("id, item_id, claimed_by, message, status, created_at")
+      .select("*")
       .order("created_at", { ascending: false });
 
     if (claimErr) throw claimErr;
@@ -99,23 +99,21 @@ const fetchClaims = async () => {
     const final: ClaimView[] = [];
 
     for (const row of claimRows as ClaimRow[]) {
-
-      // ========================= LOAD ITEM =========================
+      /* ---------------- LOAD ITEM ---------------- */
       const { data: item } = await supabase
         .from("items")
         .select("*")
         .eq("id", row.item_id)
         .single();
 
-      // ========================= LOAD CLAIMING USER =========================
-      // FIX: this is the person WHO MADE THE CLAIM
-      const { data: claimer } = await supabase
+      /* ---------------- LOAD USER WHO MADE THE CLAIM ---------------- */
+      const { data: user } = await supabase
         .from("profiles")
         .select("id, full_name, email")
-        .eq("id", row.claimed_by)
+        .eq("id", row.claimed_by)   // ✅ who claimed the item (CORRECT)
         .single();
 
-      // ========================= LOAD CAMPUS =========================
+      /* ---------------- CAMPUS ---------------- */
       const { data: campus } =
         item?.campus_id
           ? await supabase
@@ -125,7 +123,7 @@ const fetchClaims = async () => {
               .single()
           : { data: null };
 
-      // ========================= LOAD CATEGORY =========================
+      /* ---------------- CATEGORY ---------------- */
       const { data: category } =
         item?.category_id
           ? await supabase
@@ -135,32 +133,28 @@ const fetchClaims = async () => {
               .single()
           : { data: null };
 
-      // ========================= IMAGE URL =========================
+      /* ---------------- IMAGE ---------------- */
       let imageUrl: string | null = null;
       if (item?.image) {
         const { data: url } = supabase.storage
           .from("item-photos")
           .getPublicUrl(item.image);
-
         imageUrl = url?.publicUrl || null;
       }
 
-      // ========================= PUSH INTO FINAL LIST =========================
+      /* ---------------- PUSH FINAL ROW ---------------- */
       final.push({
         id: row.id,
         message: row.message,
         status: row.status,
         created_at: row.created_at,
 
-        item:
-          item && {
-            ...item,
-            image: imageUrl,
-          },
+        item: item && {
+          ...item,
+          image: imageUrl,
+        },
 
-        // FIX 👇 this now correctly shows the CLAIMING USER
-        user: claimer,
-
+        user,                // ✅ NOW SHOWS CLAIM USER (not reporter)
         campus: campus?.name || null,
         category: category?.name || null,
       });
@@ -174,6 +168,11 @@ const fetchClaims = async () => {
     setLoading(false);
   }
 };
+
+useEffect(() => {
+  setLoading(true);
+  fetchClaims();
+}, []);
 
 
   /* ========================= REALTIME CLAIM UPDATES ========================= */
