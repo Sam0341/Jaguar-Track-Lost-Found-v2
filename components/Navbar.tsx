@@ -223,9 +223,6 @@ export default function Navbar() {
               <NavLink href="/admin/claims">Claims</NavLink>
               <NavLink href="/admin/storage">Storage</NavLink>
               <NavLink href="/admin/logs">Logs</NavLink>
-
-              {/* ⭐ NEW BUTTON: CREATE USER */}
-              <NavLink href="/admin/create-user">Create User</NavLink>
             </>
           )}
 
