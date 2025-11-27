@@ -91,7 +91,7 @@ const fetchClaims = async () => {
   try {
     const { data: claimRows, error: claimErr } = await supabase
       .from("claims")
-      .select("*")
+      .select("id, item_id, claimed_by, message, status, created_at")
       .order("created_at", { ascending: false });
 
     if (claimErr) throw claimErr;
@@ -99,56 +99,68 @@ const fetchClaims = async () => {
     const final: ClaimView[] = [];
 
     for (const row of claimRows as ClaimRow[]) {
+
+      // ========================= LOAD ITEM =========================
       const { data: item } = await supabase
         .from("items")
         .select("*")
         .eq("id", row.item_id)
-        .maybeSingle();  // ⭐ safer than .single()
+        .single();
 
-      // ⭐ FIXED USER: Load the person WHO MADE THE CLAIM
-      const { data: user } = await supabase
+      // ========================= LOAD CLAIMING USER =========================
+      // FIX: this is the person WHO MADE THE CLAIM
+      const { data: claimer } = await supabase
         .from("profiles")
         .select("id, full_name, email")
         .eq("id", row.claimed_by)
-        .maybeSingle(); // ⭐ prevents crash & shows correct user
+        .single();
 
+      // ========================= LOAD CAMPUS =========================
       const { data: campus } =
         item?.campus_id
           ? await supabase
               .from("campuses")
               .select("name")
               .eq("id", item.campus_id)
-              .maybeSingle()
+              .single()
           : { data: null };
 
+      // ========================= LOAD CATEGORY =========================
       const { data: category } =
         item?.category_id
           ? await supabase
               .from("categories")
               .select("name")
               .eq("id", item.category_id)
-              .maybeSingle()
+              .single()
           : { data: null };
 
+      // ========================= IMAGE URL =========================
       let imageUrl: string | null = null;
       if (item?.image) {
         const { data: url } = supabase.storage
           .from("item-photos")
           .getPublicUrl(item.image);
+
         imageUrl = url?.publicUrl || null;
       }
 
+      // ========================= PUSH INTO FINAL LIST =========================
       final.push({
         id: row.id,
         message: row.message,
         status: row.status,
         created_at: row.created_at,
+
         item:
           item && {
             ...item,
             image: imageUrl,
           },
-        user,
+
+        // FIX 👇 this now correctly shows the CLAIMING USER
+        user: claimer,
+
         campus: campus?.name || null,
         category: category?.name || null,
       });
