@@ -251,50 +251,64 @@ useEffect(() => {
   }, [messages]);
 
   /* ========================= ADMIN SEND MESSAGE ========================= */
-  async function sendMessage(e: any) {
-    e.preventDefault();
-    if (!selectedClaim) return;
+  /* ========================= ADMIN SEND MESSAGE ========================= */
+async function sendMessage(e: any) {
+  e.preventDefault();
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) return;
-
-    const text = e.target.elements.message.value.trim();
-    let imageUrl: string | null = null;
-
-    if (selectedFile) {
-      const ext = selectedFile.name.split(".").pop();
-      const fileName = `${selectedClaim.id}/${Date.now()}.${ext}`;
-
-      const { error: uploadErr } = await supabase.storage
-        .from("chat_uploads")
-        .upload(fileName, selectedFile);
-
-      if (!uploadErr) {
-        const { data } = supabase.storage
-          .from("chat_uploads")
-          .getPublicUrl(fileName);
-        imageUrl = data.publicUrl;
-      }
-    }
-
-    const finalContent = text || (imageUrl ? "[image]" : "");
-
-    await supabase.from("messages").insert([
-      {
-        claim_id: selectedClaim.id,
-        sender_id: user.id,
-        content: finalContent,
-        is_admin: true,
-        image_url: imageUrl,
-      },
-    ]);
-
-    e.target.reset();
-    setSelectedFile(null);
-    setPreviewImage(null);
+  // ✅ SAFETY CHECK — Must have a claim selected
+  if (!selectedClaim || !selectedClaim.id) {
+    console.error("No claim selected");
+    return;
   }
+
+  // ✅ GET CURRENT ADMIN USER
+  const { data: authData, error: authErr } = await supabase.auth.getUser();
+  if (authErr || !authData?.user) {
+    console.error("Not logged in");
+    return;
+  }
+
+  const user = authData.user; // <-- FIXED!
+
+  const text = e.target.elements.message.value.trim();
+  let imageUrl: string | null = null;
+
+  // ===== OPTIONAL IMAGE UPLOAD =====
+  if (selectedFile) {
+    const ext = selectedFile.name.split(".").pop();
+    const fileName = `${selectedClaim.id}/${Date.now()}.${ext}`;
+
+    const { error: uploadErr } = await supabase.storage
+      .from("chat_uploads")
+      .upload(fileName, selectedFile);
+
+    if (!uploadErr) {
+      const { data } = supabase.storage
+        .from("chat_uploads")
+        .getPublicUrl(fileName);
+
+      imageUrl = data.publicUrl;
+    }
+  }
+
+  const finalContent = text || (imageUrl ? "[image]" : "");
+
+  // ===== INSERT MESSAGE =====
+  await supabase.from("messages").insert([
+    {
+      claim_id: selectedClaim.id,
+      sender_id: user.id,     // <-- FIXED — Won't crash
+      content: finalContent,
+      is_admin: true,
+      image_url: imageUrl,
+    },
+  ]);
+
+  e.target.reset();
+  setSelectedFile(null);
+  setPreviewImage(null);
+}
+
 
   /* ========================= CHANGE CLAIM STATUS ========================= */
   async function updateClaimStatus(id: string, status: "approved" | "rejected") {
